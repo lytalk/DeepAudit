@@ -1,12 +1,12 @@
 """
 DeepAudit Agent 服务模块
-基于动态 Agent 树架构的 AI 代码安全审计
+基于动态 Agent 树架构的 AI 代码质量审查（运行缺陷检测）
 
 架构:
 - OrchestratorAgent 作为编排层，动态调度子 Agent
 - ReconAgent 负责侦察和文件分析
-- AnalysisAgent 负责漏洞分析
-- VerificationAgent 负责验证发现
+- AnalysisAgent 负责缺陷分析
+- VerificationAgent 负责验证发现（复现/测试）
 
 工作流:
     START → Orchestrator → [Recon/Analysis/Verification] → Report → END

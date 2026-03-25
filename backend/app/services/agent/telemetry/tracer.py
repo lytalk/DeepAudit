@@ -406,27 +406,27 @@ class Tracer:
     
     def _save_final_report(self, run_dir: Path) -> None:
         """保存最终报告"""
-        report_file = run_dir / "security_audit_report.md"
+        report_file = run_dir / "code_quality_report.md"
         
         with report_file.open("w", encoding="utf-8") as f:
-            f.write("# 安全审计报告\n\n")
+            f.write("# 代码质量审查报告（运行缺陷检测）\n\n")
             f.write(f"**生成时间:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n")
             f.write(f"**运行ID:** {self.run_id}\n\n")
             
             # 统计信息
             f.write("## 审计概述\n\n")
-            f.write(f"- 发现漏洞数: {len(self.vulnerability_reports)}\n")
+            f.write(f"- 发现缺陷数: {len(self.vulnerability_reports)}\n")
             f.write(f"- 参与Agent数: {len(self.agents)}\n")
             f.write(f"- 工具调用数: {len(self.tool_executions)}\n\n")
             
-            # 漏洞统计
+            # 缺陷统计（字段名保持 compatibility）
             if self.vulnerability_reports:
                 severity_counts = {}
                 for vuln in self.vulnerability_reports:
                     severity = vuln.get("severity", "unknown")
                     severity_counts[severity] = severity_counts.get(severity, 0) + 1
                 
-                f.write("### 漏洞严重性分布\n\n")
+                f.write("### 缺陷严重性分布\n\n")
                 for severity, count in sorted(severity_counts.items()):
                     f.write(f"- {severity.upper()}: {count}\n")
                 f.write("\n")
@@ -437,13 +437,13 @@ class Tracer:
         logger.info(f"Saved final report to: {report_file}")
     
     def _save_vulnerability_reports(self) -> None:
-        """保存漏洞报告"""
+        """保存缺陷报告（字段名保持 compatibility）"""
         if not self.vulnerability_reports:
             return
         
         try:
             run_dir = self.get_run_dir()
-            vuln_dir = run_dir / "vulnerabilities"
+            vuln_dir = run_dir / "defects"
             vuln_dir.mkdir(exist_ok=True)
             
             # 只保存新的报告
@@ -461,7 +461,7 @@ class Tracer:
                     f.write(f"**发现时间:** {report['timestamp']}\n")
                     
                     if report.get("vulnerability_type"):
-                        f.write(f"**漏洞类型:** {report['vulnerability_type']}\n")
+                        f.write(f"**缺陷类型:** {report['vulnerability_type']}\n")
                     if report.get("file_path"):
                         f.write(f"**文件位置:** {report['file_path']}\n")
                     
@@ -470,9 +470,9 @@ class Tracer:
                 
                 self._saved_vuln_ids.add(report["id"])
             
-            # 保存漏洞索引 CSV
+            # 保存缺陷索引 CSV
             if self.vulnerability_reports:
-                csv_file = run_dir / "vulnerabilities.csv"
+                csv_file = run_dir / "defects.csv"
                 severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
                 sorted_reports = sorted(
                     self.vulnerability_reports,
@@ -495,7 +495,7 @@ class Tracer:
                         })
             
             if new_reports:
-                logger.info(f"Saved {len(new_reports)} new vulnerability reports to {vuln_dir}")
+                logger.info(f"Saved {len(new_reports)} new defect reports to {vuln_dir}")
                 
         except Exception as e:
             logger.warning(f"Failed to save vulnerability reports: {e}")

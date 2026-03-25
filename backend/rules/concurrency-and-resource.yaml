@@ -1,0 +1,222 @@
+rules:
+
+  # ════════════════════════════════════════════════════════════════
+  # 并发问题
+  # ════════════════════════════════════════════════════════════════
+
+  # ─── 1. 非线程安全集合 ────────────────────────────────────────────────
+  - id: hashmap-in-multithreaded-context
+    languages: [java]
+    severity: WARNING
+    message: |
+      [并发] 在多线程环境中使用 HashMap，存在数据竞争与死循环风险（JDK 7 resize bug）。
+      建议：改用 ConcurrentHashMap。
+    patterns:
+      - pattern: |
+          static $TYPE $FIELD = new HashMap(...);
+      - pattern: |
+          private $TYPE $FIELD = new HashMap(...);
+    metadata:
+      category: concurrency
+      subcategory: unsafe-collection
+
+  - id: arraylist-static-field
+    languages: [java]
+    severity: WARNING
+    message: |
+      [并发] 静态或共享字段使用 ArrayList，多线程并发写时线程不安全。
+      建议：改用 CopyOnWriteArrayList 或在操作时加锁。
+    pattern: |
+      static $TYPE $FIELD = new ArrayList(...);
+    metadata:
+      category: concurrency
+      subcategory: unsafe-collection
+
+  - id: hashset-static-field
+    languages: [java]
+    severity: WARNING
+    message: |
+      [并发] 静态字段使用 HashSet，多线程并发修改不安全。
+      建议：改用 ConcurrentHashMap.newKeySet() 或 Collections.synchronizedSet()。
+    pattern: |
+      static $TYPE $FIELD = new HashSet(...);
+    metadata:
+      category: concurrency
+      subcategory: unsafe-collection
+
+  # ─── 2. 线程池无界队列 ────────────────────────────────────────────────
+  - id: unbounded-linkedblockingqueue-threadpool
+    languages: [java]
+    severity: ERROR
+    message: |
+      [并发] 使用无界 LinkedBlockingQueue 创建线程池，任务积压时可能触发 OOM。
+      建议：明确指定队列容量上限，并配置拒绝策略（RejectedExecutionHandler）。
+    pattern: |
+      new ThreadPoolExecutor(..., new LinkedBlockingQueue(), ...);
+    metadata:
+      category: concurrency
+      subcategory: unbounded-queue
+
+  - id: executors-newfixedthreadpool
+    languages: [java]
+    severity: WARNING
+    message: |
+      [并发] Executors.newFixedThreadPool() 内部使用无界 LinkedBlockingQueue，
+      任务量大时可能 OOM。建议直接使用 ThreadPoolExecutor 并显式设置队列容量与拒绝策略。
+    pattern: Executors.newFixedThreadPool(...)
+    metadata:
+      category: concurrency
+      subcategory: unbounded-queue
+
+  - id: executors-newsinglethreadexecutor
+    languages: [java]
+    severity: WARNING
+    message: |
+      [并发] Executors.newSingleThreadExecutor() 使用无界队列，存在 OOM 风险。
+      建议：使用 ThreadPoolExecutor 并显式指定队列容量。
+    pattern: Executors.newSingleThreadExecutor(...)
+    metadata:
+      category: concurrency
+      subcategory: unbounded-queue
+
+  - id: executors-newcachedthreadpool
+    languages: [java]
+    severity: WARNING
+    message: |
+      [并发] Executors.newCachedThreadPool() 线程数无上限，高并发时可能创建大量线程耗尽资源。
+      建议：使用 ThreadPoolExecutor 并明确 maximumPoolSize 与存活时间。
+    pattern: Executors.newCachedThreadPool(...)
+    metadata:
+      category: concurrency
+      subcategory: unbounded-queue
+
+  # ════════════════════════════════════════════════════════════════
+  # 资源泄露
+  # ════════════════════════════════════════════════════════════════
+
+  # ─── 3. IO 流未关闭 ───────────────────────────────────────────────────
+  - id: filereader-not-closed
+    languages: [java]
+    severity: ERROR
+    message: |
+      [资源泄露] FileReader 未在 try-with-resources 或 finally 块中关闭，存在文件句柄泄露。
+      建议：使用 try (FileReader fr = new FileReader(file)) { ... }。
+    patterns:
+      - pattern: |
+          $FR = new FileReader(...);
+          ...
+          $FR.read(...);
+      - pattern-not: |
+          try ($TYPE $FR = ...) { ... }
+      - pattern-not: |
+          try { ... } finally { $FR.close(); }
+    metadata:
+      category: resource-leak
+      subcategory: io-stream
+
+  - id: filewriter-not-closed
+    languages: [java]
+    severity: ERROR
+    message: |
+      [资源泄露] FileWriter 未关闭，缓冲区内容可能丢失且存在文件句柄泄露。
+      建议：使用 try-with-resources，确保 flush() 和 close() 都被执行。
+    patterns:
+      - pattern: |
+          $FW = new FileWriter(...);
+          ...
+          $FW.write(...);
+      - pattern-not: |
+          try ($TYPE $FW = ...) { ... }
+      - pattern-not: |
+          try { ... } finally { $FW.close(); }
+    metadata:
+      category: resource-leak
+      subcategory: io-stream
+
+  - id: bufferedreader-not-closed
+    languages: [java]
+    severity: ERROR
+    message: |
+      [资源泄露] BufferedReader 未关闭，可能造成文件描述符泄露。
+      建议：使用 try-with-resources。
+    patterns:
+      - pattern: |
+          $BR = new BufferedReader(...);
+          ...
+          $BR.readLine(...);
+      - pattern-not: |
+          try ($TYPE $BR = ...) { ... }
+      - pattern-not: |
+          try { ... } finally { $BR.close(); }
+    metadata:
+      category: resource-leak
+      subcategory: io-stream
+
+  # ─── 4. JDBC 连接未关闭 ──────────────────────────────────────────────
+  - id: jdbc-connection-not-closed
+    languages: [java]
+    severity: ERROR
+    message: |
+      [资源泄露] JDBC Connection 未在 finally 块或 try-with-resources 中关闭，
+      将导致连接池连接耗尽，引发系统不可用。
+      建议：使用 try-with-resources，或在 finally 中确保 conn.close()。
+    patterns:
+      - pattern: |
+          $CONN = $DS.getConnection();
+          ...
+          $STMT = $CONN.prepareStatement(...);
+      - pattern-not: |
+          try ($TYPE $CONN = ...) { ... }
+      - pattern-not: |
+          try { ... } finally { $CONN.close(); }
+    metadata:
+      category: resource-leak
+      subcategory: jdbc
+
+  - id: resultset-not-closed
+    languages: [java]
+    severity: ERROR
+    message: |
+      [资源泄露] ResultSet 未关闭，持续占用数据库游标和内存资源。
+      建议：在 finally 块中或 try-with-resources 中关闭 ResultSet。
+    patterns:
+      - pattern: |
+          $RS = $STMT.executeQuery(...);
+          ...
+          $RS.next();
+      - pattern-not: |
+          try ($TYPE $RS = ...) { ... }
+      - pattern-not: |
+          try { ... } finally { $RS.close(); }
+    metadata:
+      category: resource-leak
+      subcategory: jdbc
+
+  # ─── 5. 本地线程未销毁 ───────────────────────────────────────────────
+  - id: threadlocal-no-remove
+    languages: [java]
+    severity: WARNING
+    message: |
+      [资源泄露] ThreadLocal 使用后未调用 remove()，在线程池场景下线程复用时
+      将导致数据污染，严重时引发内存泄露。
+      建议：在 finally 块中调用 threadLocal.remove()。
+    patterns:
+      - pattern: |
+          $TL.set(...);
+          ...
+      - pattern-not: |
+          try { ... } finally { $TL.remove(); }
+    metadata:
+      category: resource-leak
+      subcategory: thread-local
+
+  - id: new-thread-no-executor
+    languages: [java]
+    severity: WARNING
+    message: |
+      [资源泄露] 直接 new Thread() 创建线程，脱离线程池管理，无法统一监控和回收。
+      建议：通过 ExecutorService / ThreadPoolExecutor 统一管理线程生命周期。
+    pattern: new Thread(...)
+    metadata:
+      category: resource-leak
+      subcategory: unmanaged-thread

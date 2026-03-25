@@ -787,7 +787,7 @@ class BaseAgent(ABC):
     # ============ 发现相关事件 ============
 
     async def emit_finding(self, title: str, severity: str, vuln_type: str, file_path: str = "", is_verified: bool = False):
-        """发射漏洞发现事件"""
+        """发射缺陷发现事件（字段名保持 compatibility）"""
         import uuid
         finding_id = str(uuid.uuid4())
 
@@ -812,7 +812,7 @@ class BaseAgent(ABC):
             event_type = "finding_verified" if is_verified else "finding_new"
             await self.emit_event(
                 event_type,
-                f"{severity_emoji} [{self.name}] 发现漏洞: [{severity.upper()}] {title}\n   类型: {vuln_type}\n   位置: {file_path}",
+                f"{severity_emoji} [{self.name}] 发现缺陷: [{severity.upper()}] {title}\n   类型: {vuln_type}\n   位置: {file_path}",
                 metadata={
                     "id": finding_id,
                     "title": title,

@@ -68,6 +68,14 @@ class SandboxManager:
             self._docker_client = docker.from_env()
             # 测试连接
             self._docker_client.ping()
+
+            # 预检沙箱镜像是否存在；若不存在则尝试回退到常见镜像源（避免 Docker Hub）
+            try:
+                self._ensure_sandbox_image_available()
+            except Exception as e:
+                # 不阻断初始化，但会在执行阶段体现为 run 失败；这里提前给出更明确的日志
+                logger.warning(f"⚠️ Sandbox image preflight failed: {e}")
+
             self._initialized = True
             self._init_error = None
             logger.info("✅ Docker sandbox manager initialized successfully")
@@ -81,6 +89,41 @@ class SandboxManager:
             logger.warning(f"Docker connection traceback: {traceback.format_exc()}")
             self._docker_client = None
             self._init_error = f"{type(e).__name__}: {str(e)}"
+
+    def _ensure_sandbox_image_available(self) -> None:
+        """
+        确保配置的沙箱镜像在本机可用。
+        - 若目标镜像不存在，尝试使用备用镜像名（通常是内网 Harbor/GHCR 镜像）
+        - 若仍不可用，抛出异常以便上层提示用户进行构建/拉取
+        """
+        if not self._docker_client:
+            raise RuntimeError("Docker client not initialized")
+
+        try:
+            self._docker_client.images.get(self.config.image)
+            return
+        except Exception:
+            pass
+
+        fallback_images = [
+            # 常见的内网/镜像源（项目中经常存在这些 tag）
+            "ghcr.nju.edu.cn/lintsinghua/deepaudit-sandbox:latest",
+            "harbor.zj.sgcc.com.cn/deepaudit/deepaudit-sandbox:latest",
+        ]
+
+        for img in fallback_images:
+            try:
+                self._docker_client.images.get(img)
+                logger.warning(f"🔁 Sandbox image fallback: '{self.config.image}' -> '{img}'")
+                self.config.image = img
+                return
+            except Exception:
+                continue
+
+        raise RuntimeError(
+            f"Sandbox image not found locally: {self.config.image}. "
+            f"Please pull/build it (or set SANDBOX_IMAGE to an existing local image)."
+        )
     
     @property
     def is_available(self) -> bool:
@@ -319,8 +362,10 @@ class SandboxManager:
                 
                 return {
                     "success": result["StatusCode"] == 0,
-                    "stdout": stdout.decode('utf-8', errors='ignore')[:50000], # 增大日志限制
-                    "stderr": stderr.decode('utf-8', errors='ignore')[:5000],
+                    # ⚠️ 外部工具（如 semgrep --json）可能输出较大的 JSON；过小的截断会导致解析失败
+                    # 这里保留截断保护，但上限提高，避免把 JSON 截断成半截
+                    "stdout": stdout.decode('utf-8', errors='ignore')[:2_000_000],
+                    "stderr": stderr.decode('utf-8', errors='ignore')[:50_000],
                     "exit_code": result["StatusCode"],
                     "error": None,
                 }

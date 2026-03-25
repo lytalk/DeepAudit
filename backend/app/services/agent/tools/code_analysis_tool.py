@@ -1,6 +1,6 @@
 """
 代码分析工具
-使用 LLM 深度分析代码安全问题
+使用 LLM 深度分析代码运行缺陷与质量问题
 """
 
 import json
@@ -20,7 +20,7 @@ class CodeAnalysisInput(BaseModel):
     language: str = Field(default="python", description="编程语言")
     focus: Optional[str] = Field(
         default=None,
-        description="重点关注的漏洞类型，如 sql_injection, xss, command_injection"
+        description="重点关注的缺陷类型，如 null_pointer, resource_leak, n_plus_one_query, deadlock, oom"
     )
     context: Optional[str] = Field(
         default=None,
@@ -31,7 +31,7 @@ class CodeAnalysisInput(BaseModel):
 class CodeAnalysisTool(AgentTool):
     """
     代码分析工具
-    使用 LLM 对代码进行深度安全分析
+    使用 LLM 对代码进行深度缺陷分析
     """
     
     def __init__(self, llm_service):
@@ -50,20 +50,20 @@ class CodeAnalysisTool(AgentTool):
     
     @property
     def description(self) -> str:
-        return """深度分析代码安全问题。
-使用 LLM 对代码进行全面的安全审计，识别潜在漏洞。
+        return """深度分析代码运行缺陷与质量问题。
+使用 LLM 对代码进行上下文感知分析，识别潜在稳定性/性能/并发/资源管理缺陷。
 
 使用场景:
 - 对疑似有问题的代码进行深入分析
-- 分析复杂的业务逻辑漏洞
+- 分析复杂的业务逻辑缺陷
 - 追踪数据流和污点传播
-- 生成详细的漏洞报告和修复建议
+- 生成详细的缺陷说明和修复建议
 
 输入:
 - code: 要分析的代码
 - file_path: 文件路径
 - language: 编程语言
-- focus: 可选，重点关注的漏洞类型
+- focus: 可选，重点关注的缺陷类型
 - context: 可选，额外的上下文代码
 
 这个工具会消耗较多的 Token，建议在确认有疑似问题后使用。"""

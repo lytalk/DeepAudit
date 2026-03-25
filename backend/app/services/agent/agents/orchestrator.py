@@ -575,7 +575,7 @@ Action Input: {{"参数": "值"}}
         
         msg += f"""
 ## 用户配置
-- 目标缺陷类型: {config.get('target_defects', config.get('target_vulnerabilities', ['all']))}
+- 目标缺陷类型: {config.get('target_defects') or ['stability', 'performance', 'concurrency', 'resource_leak']}
 - 验证级别: {config.get('verification_level', 'standard')}
 - 排除模式: {config.get('exclude_patterns', [])}
 
@@ -1458,7 +1458,7 @@ Action Input: {{"参数": "值"}}
                         severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
                     insights.append(
-                        f"漏洞分布: Critical={severity_counts.get('critical', 0)}, "
+                        f"缺陷分布: Critical={severity_counts.get('critical', 0)}, "
                         f"High={severity_counts.get('high', 0)}, "
                         f"Medium={severity_counts.get('medium', 0)}, "
                         f"Low={severity_counts.get('low', 0)}"

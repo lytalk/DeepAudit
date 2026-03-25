@@ -1,11 +1,11 @@
 """
 模式匹配工具
-快速扫描代码中的危险模式
+快速扫描代码中的高风险模式（运行缺陷优先）
 
 优化版本：
 - 支持直接扫描文件（无需先读取）
 - 支持传入代码内容扫描
-- 增强的漏洞模式库（OWASP Top 10 2025）
+- ⚠️ 说明：本工具为“内置兜底工具”，优先级低于 Semgrep 自定义规则与 smart_scan
 - 更好的输出格式化
 """
 
@@ -47,7 +47,7 @@ class PatternMatchInput(BaseModel):
     file_path: str = Field(default="unknown", description="文件路径（用于上下文）")
     pattern_types: Optional[List[str]] = Field(
         default=None,
-        description="要检测的漏洞类型列表，如 ['sql_injection', 'xss']。为空则检测所有类型"
+        description="要检测的缺陷类型列表，如 ['resource_leak', 'n_plus_one_query', 'null_pointer']。为空则检测所有类型"
     )
     language: Optional[str] = Field(default=None, description="编程语言，用于选择特定模式")
 
@@ -55,7 +55,7 @@ class PatternMatchInput(BaseModel):
 class PatternMatchTool(AgentTool):
     """
     模式匹配工具
-    使用正则表达式快速扫描代码中的危险模式
+    使用正则表达式快速扫描代码中的高风险模式（作为外部工具不可用时的兜底方案）
     """
     
     def __init__(self, project_root: str = None):

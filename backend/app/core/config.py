@@ -109,7 +109,8 @@ class Settings(BaseSettings):
     AGENT_TIMEOUT_SECONDS: int = 1800  # Agent 超时时间（30分钟）
     
     # 沙箱配置（必须）
-    SANDBOX_IMAGE: str = "deepaudit/sandbox:latest"  # 沙箱 Docker 镜像
+    # 沙箱 Docker 镜像（优先使用可本地/内网拉取的镜像地址，避免依赖 Docker Hub）
+    SANDBOX_IMAGE: str = "ghcr.nju.edu.cn/lintsinghua/deepaudit-sandbox:latest"
     SANDBOX_MEMORY_LIMIT: str = "512m"  # 沙箱内存限制
     SANDBOX_CPU_LIMIT: float = 1.0  # 沙箱 CPU 限制
     SANDBOX_TIMEOUT: int = 60  # 沙箱命令超时（秒）

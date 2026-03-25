@@ -735,11 +735,7 @@ async def _initialize_tools(
         CreateVulnerabilityReportTool,
         VulnerabilityValidationTool,
         # 🔥 RAG 工具
-        RAGQueryTool, SecurityCodeSearchTool, FunctionContextTool,
-    )
-    from app.services.agent.knowledge import (
-        SecurityKnowledgeQueryTool,
-        GetVulnerabilityKnowledgeTool,
+        RAGQueryTool, FunctionContextTool,
     )
     # 🔥 RAG 相关导入
     from app.services.rag import CodeIndexer, CodeRetriever, EmbeddingService, IndexUpdateMode
@@ -954,24 +950,16 @@ async def _initialize_tools(
         # 外部安全工具 (传入共享的 sandbox_manager)
         "semgrep_scan": SemgrepTool(project_root, sandbox_manager),
         "bandit_scan": BanditTool(project_root, sandbox_manager),
-        "gitleaks_scan": GitleaksTool(project_root, sandbox_manager),
-        "npm_audit": NpmAuditTool(project_root, sandbox_manager),
-        "safety_scan": SafetyTool(project_root, sandbox_manager),
-        "trufflehog_scan": TruffleHogTool(project_root, sandbox_manager),
-        "osv_scan": OSVScannerTool(project_root, sandbox_manager),
-        # 安全知识查询
-        "query_security_knowledge": SecurityKnowledgeQueryTool(),
-        "get_vulnerability_knowledge": GetVulnerabilityKnowledgeTool(),
+        # ⚠️ 说明：依赖/密钥/漏洞类工具不再作为默认分析工具，避免偏离运行缺陷优先级策略
     }
 
     # 🔥 注册 RAG 工具到 Analysis Agent
     if retriever:
         analysis_tools["rag_query"] = RAGQueryTool(retriever)
-        analysis_tools["security_search"] = SecurityCodeSearchTool(retriever)
         analysis_tools["function_context"] = FunctionContextTool(retriever)
-        logger.info("✅ RAG 工具 (rag_query, security_search, function_context) 已注册到 Analysis Agent")
+        logger.info("✅ RAG 工具 (rag_query, function_context) 已注册到 Analysis Agent")
     else:
-        logger.warning("⚠️ RAG 未初始化，rag_query/security_search/function_context 工具不可用")
+        logger.warning("⚠️ RAG 未初始化，rag_query/function_context 工具不可用")
     
     # Verification 工具
     # 🔥 导入沙箱工具
@@ -1210,6 +1198,13 @@ async def _save_findings(
         "race_condition": VulnerabilityType.RACE_CONDITION,
         "business_logic": VulnerabilityType.BUSINESS_LOGIC,
         "memory_corruption": VulnerabilityType.MEMORY_CORRUPTION,
+        # 运行缺陷类型（与 system_prompts.py 的缺陷类别对齐）
+        "stability": VulnerabilityType.STABILITY,
+        "performance": VulnerabilityType.PERFORMANCE,
+        "concurrency": VulnerabilityType.CONCURRENCY,
+        "resource_leak": VulnerabilityType.RESOURCE_LEAK,
+        "resource": VulnerabilityType.RESOURCE_LEAK,
+        "leak": VulnerabilityType.RESOURCE_LEAK,
     }
 
     saved_count = 0
@@ -1231,11 +1226,20 @@ async def _save_findings(
 
             # 🔥 Handle vulnerability type (case-insensitive & snake_case normalization)
             # Support multiple field names: vulnerability_type, type, vuln_type
+            extra = finding.get("extra", {}) or {}
+            extra_meta = (extra.get("metadata") or {}) if isinstance(extra, dict) else {}
+
+            # 🔥 优先识别“缺陷类别”
+            # - Semgrep: extra.metadata.category
+            # - SmartScan/LLM: category / defect_type / type / vulnerability_type
             raw_type = str(
-                finding.get("vulnerability_type") or
-                finding.get("type") or
-                finding.get("vuln_type") or
-                "other"
+                finding.get("defect_type")
+                or finding.get("category")
+                or extra_meta.get("category")
+                or finding.get("vulnerability_type")
+                or finding.get("type")
+                or finding.get("vuln_type")
+                or "other"
             ).lower().strip().replace(" ", "_").replace("-", "_")
 
             type_enum = type_map.get(raw_type, VulnerabilityType.OTHER)
@@ -1259,12 +1263,98 @@ async def _save_findings(
                 type_enum = VulnerabilityType.HARDCODED_SECRET
             if "deserial" in raw_type:
                 type_enum = VulnerabilityType.DESERIALIZATION
+            # 缺陷类型兜底（兼容更具体的描述，如 stability-null-deref）
+            if "stabil" in raw_type or "npe" in raw_type or "null" in raw_type or "exception" in raw_type:
+                type_enum = VulnerabilityType.STABILITY
+            if "perf" in raw_type or "slow" in raw_type or "latency" in raw_type:
+                type_enum = VulnerabilityType.PERFORMANCE
+            if "concurr" in raw_type or "thread" in raw_type or "deadlock" in raw_type or "race" in raw_type:
+                type_enum = VulnerabilityType.CONCURRENCY
+            if "leak" in raw_type or "close" in raw_type or "resource" in raw_type or "connection" in raw_type:
+                type_enum = VulnerabilityType.RESOURCE_LEAK
+
+            # 🔥 兜底：当上游没有提供类型时，从标题/描述反推缺陷类别
+            # 典型场景：LLM 生成的 finding 未填 defect_type/category，导致 raw_type=other
+            if type_enum == VulnerabilityType.OTHER:
+                title_text = str(finding.get("title") or "").lower()
+                desc_text = str(
+                    finding.get("description")
+                    or finding.get("details")
+                    or finding.get("explanation")
+                    or finding.get("impact")
+                    or extra.get("message")
+                    or ""
+                ).lower()
+                hint = f"{title_text}\n{desc_text}"
+
+                # 稳定性：空指针、异常、递归、死循环、栈溢出、OOM
+                if (
+                    "null" in hint
+                    or "npe" in hint
+                    or "空指针" in hint
+                    or "exception" in hint
+                    or "未捕获" in hint
+                    or "递归" in hint
+                    or "recurs" in hint
+                    or "stackoverflow" in hint
+                    or "stack overflow" in hint
+                    or "死循环" in hint
+                    or "oom" in hint
+                    or "outofmemory" in hint
+                    or "out of memory" in hint
+                ):
+                    type_enum = VulnerabilityType.STABILITY
+                # 性能：慢查询、全表扫描、循环查询/远程调用
+                elif (
+                    "slow" in hint
+                    or "性能" in hint
+                    or "latency" in hint
+                    or "全表" in hint
+                    or "full scan" in hint
+                    or "n+1" in hint
+                    or "循环" in hint and ("查询" in hint or "远程" in hint or "rpc" in hint or "http" in hint)
+                ):
+                    type_enum = VulnerabilityType.PERFORMANCE
+                # 并发：竞态、死锁、线程安全、锁竞争、线程池
+                elif (
+                    "race" in hint
+                    or "竞态" in hint
+                    or "deadlock" in hint
+                    or "死锁" in hint
+                    or "thread" in hint
+                    or "线程" in hint
+                    or "锁" in hint
+                    or "synchronized" in hint
+                    or "threadpool" in hint
+                    or "线程池" in hint
+                ):
+                    type_enum = VulnerabilityType.CONCURRENCY
+                # 资源泄露：未关闭、泄露、连接未释放、句柄
+                elif (
+                    "leak" in hint
+                    or "泄露" in hint
+                    or "未关闭" in hint
+                    or "not closed" in hint
+                    or "connection" in hint
+                    or "连接" in hint
+                    or "handle" in hint
+                    or "句柄" in hint
+                    or "stream" in hint
+                    or "io" in hint
+                ):
+                    type_enum = VulnerabilityType.RESOURCE_LEAK
 
             # 🔥 Handle file path (support multiple field names)
+            # Semgrep 常用字段: path / start.line / end.line / extra.message / extra.lines
             file_path = (
                 finding.get("file_path") or
+                finding.get("path") or
                 finding.get("file") or
-                finding.get("location", "").split(":")[0] if ":" in finding.get("location", "") else finding.get("location")
+                (
+                    finding.get("location", "").split(":")[0]
+                    if ":" in finding.get("location", "")
+                    else finding.get("location")
+                )
             )
 
             # 🔥 v2.1: 文件路径验证 - 过滤幻觉发现
@@ -1283,20 +1373,29 @@ async def _save_findings(
                         continue  # 跳过这个发现
 
             # 🔥 Handle line numbers (support multiple formats)
-            line_start = finding.get("line_start") or finding.get("line")
-            if not line_start and ":" in finding.get("location", ""):
+            line_start = (
+                finding.get("line_start")
+                or finding.get("line")
+                or (finding.get("start", {}) or {}).get("line")
+            )
+            if not line_start and ":" in (finding.get("location", "") or ""):
                 try:
-                    line_start = int(finding.get("location", "").split(":")[1])
+                    line_start = int((finding.get("location", "") or "").split(":")[1])
                 except (ValueError, IndexError):
                     line_start = None
 
-            line_end = finding.get("line_end") or line_start
+            line_end = (
+                finding.get("line_end")
+                or (finding.get("end", {}) or {}).get("line")
+                or line_start
+            )
 
             # 🔥 Handle code snippet (support multiple field names)
             code_snippet = (
-                finding.get("code_snippet") or
-                finding.get("code") or
-                finding.get("vulnerable_code")
+                finding.get("code_snippet")
+                or finding.get("code")
+                or finding.get("vulnerable_code")
+                or extra.get("lines")
             )
 
             # 🔥 Handle title (generate from type if not provided)
@@ -1311,11 +1410,12 @@ async def _save_findings(
 
             # 🔥 Handle description (support multiple field names)
             description = (
-                finding.get("description") or
-                finding.get("details") or
-                finding.get("explanation") or
-                finding.get("impact") or
-                ""
+                finding.get("description")
+                or finding.get("details")
+                or finding.get("explanation")
+                or finding.get("impact")
+                or extra.get("message")
+                or ""
             )
 
             # 🔥 Handle suggestion/recommendation
@@ -3377,10 +3477,11 @@ async def generate_audit_report(
     md_lines.append("")
 
     # Detailed Findings
+
     if not findings:
-        md_lines.append("## 漏洞详情")
+        md_lines.append("## 缺陷详情")
         md_lines.append("")
-        md_lines.append("*本次审计未发现安全漏洞。*")
+        md_lines.append("*本次审查未发现运行缺陷。*")
         md_lines.append("")
     else:
         # Group findings by severity
@@ -3396,7 +3497,7 @@ async def generate_audit_report(
             if not severity_findings:
                 continue
 
-            md_lines.append(f"## {severity_name} 漏洞")
+            md_lines.append(f"## {severity_name} 缺陷")
             md_lines.append("")
 
             for i, f in enumerate(severity_findings, 1):
@@ -3423,7 +3524,7 @@ async def generate_audit_report(
                     md_lines.append("")
 
                 if f.description:
-                    md_lines.append("**漏洞描述:**")
+                    md_lines.append("**缺陷描述:**")
                     md_lines.append("")
                     md_lines.append(f.description)
                     md_lines.append("")
@@ -3478,7 +3579,7 @@ async def generate_audit_report(
                             'groovy': 'groovy', 'gradle': 'groovy',
                         }
                         lang = lang_map.get(ext, 'text')
-                    md_lines.append("**漏洞代码:**")
+                    md_lines.append("**缺陷代码:**")
                     md_lines.append("")
                     md_lines.append(f"```{lang}")
                     md_lines.append(f.code_snippet.strip())
@@ -3499,30 +3600,6 @@ async def generate_audit_report(
                     md_lines.append("```")
                     md_lines.append("")
 
-                # 🔥 添加 PoC 详情
-                if f.has_poc:
-                    md_lines.append("**概念验证 (PoC):**")
-                    md_lines.append("")
-
-                    if f.poc_description:
-                        md_lines.append(f"*{f.poc_description}*")
-                        md_lines.append("")
-
-                    if f.poc_steps:
-                        md_lines.append("**复现步骤:**")
-                        md_lines.append("")
-                        for step_idx, step in enumerate(f.poc_steps, 1):
-                            md_lines.append(f"{step_idx}. {step}")
-                        md_lines.append("")
-
-                    if f.poc_code:
-                        md_lines.append("**PoC 代码:**")
-                        md_lines.append("")
-                        md_lines.append("```")
-                        md_lines.append(f.poc_code.strip())
-                        md_lines.append("```")
-                        md_lines.append("")
-
                 md_lines.append("---")
                 md_lines.append("")
 
@@ -3530,14 +3607,14 @@ async def generate_audit_report(
     if critical > 0 or high > 0:
         md_lines.append("## 修复优先级建议")
         md_lines.append("")
-        md_lines.append("基于已发现的漏洞，我们建议按以下优先级进行修复：")
+        md_lines.append("基于已发现的缺陷，我们建议按以下优先级进行修复：")
         md_lines.append("")
         priority_idx = 1
         if critical > 0:
-            md_lines.append(f"{priority_idx}. **立即修复:** 处理 {critical} 个严重漏洞 - 可能造成严重影响")
+            md_lines.append(f"{priority_idx}. **立即修复:** 处理 {critical} 个严重缺陷 - 可能造成严重影响")
             priority_idx += 1
         if high > 0:
-            md_lines.append(f"{priority_idx}. **高优先级:** 在 1 周内修复 {high} 个高危漏洞")
+            md_lines.append(f"{priority_idx}. **高优先级:** 在 1 周内修复 {high} 个高危缺陷")
             priority_idx += 1
         if medium > 0:
             md_lines.append(f"{priority_idx}. **中优先级:** 在 2-4 周内修复 {medium} 个中危漏洞")

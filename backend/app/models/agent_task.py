@@ -288,7 +288,12 @@ class VulnerabilitySeverity:
 
 
 class VulnerabilityType:
-    """漏洞类型"""
+    """类型（兼容历史字段名 vulnerability_type）
+
+    说明：
+    - 历史上这里表达“漏洞类型”，字段名也叫 vulnerability_type
+    - 目前项目已转向“运行缺陷/代码质量”，这里继续作为“发现类型”常量集合使用
+    """
     SQL_INJECTION = "sql_injection"
     NOSQL_INJECTION = "nosql_injection"
     XSS = "xss"
@@ -307,6 +312,11 @@ class VulnerabilityType:
     RACE_CONDITION = "race_condition"
     BUSINESS_LOGIC = "business_logic"
     MEMORY_CORRUPTION = "memory_corruption"
+    # 运行缺陷类型（新体系）
+    STABILITY = "stability"
+    PERFORMANCE = "performance"
+    CONCURRENCY = "concurrency"
+    RESOURCE_LEAK = "resource_leak"
     OTHER = "other"
 
 

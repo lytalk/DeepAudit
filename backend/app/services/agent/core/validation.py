@@ -169,6 +169,9 @@ class AgentTaskInput(BaseModel):
     project_root: str = Field(..., min_length=1, max_length=500)
     max_iterations: int = Field(default=20, ge=1, le=100)
     timeout_seconds: int = Field(default=1800, ge=60, le=7200)
+    # 运行缺陷类型（推荐使用）
+    target_defects: List[str] = Field(default_factory=list)
+    # 向后兼容：旧字段名（历史上用于漏洞类型）
     target_vulnerabilities: List[str] = Field(default_factory=list)
     exclude_patterns: List[str] = Field(default_factory=list)
     target_files: List[str] = Field(default_factory=list)
@@ -187,18 +190,36 @@ class AgentTaskInput(BaseModel):
             raise ValueError(f'Project root does not exist: {v}')
         return os.path.abspath(v)
 
+    @field_validator('target_defects')
+    @classmethod
+    def validate_defects(cls, v: List[str]) -> List[str]:
+        valid_types = {
+            # 稳定性
+            "null_pointer", "unhandled_exception", "infinite_recursion",
+            "deadlock", "oom",
+            # 性能
+            "n_plus_one_query", "remote_call_in_loop", "unbounded_query",
+            "performance_issue", "lock_granularity",
+            # 并发
+            "concurrency_issue", "unsafe_collection", "unbounded_queue",
+            # 资源
+            "resource_leak", "unmanaged_thread", "memory_issue",
+            # 其他
+            "other",
+        }
+        for defect in v:
+            if defect.lower() not in valid_types:
+                raise ValueError(f"Unknown defect type: {defect}")
+        return [defect.lower() for defect in v]
+
     @field_validator('target_vulnerabilities')
     @classmethod
-    def validate_vulnerabilities(cls, v: List[str]) -> List[str]:
-        valid_types = {
-            'sql_injection', 'xss', 'command_injection', 'path_traversal',
-            'ssrf', 'xxe', 'deserialization', 'auth_bypass', 'idor',
-            'csrf', 'open_redirect', 'race_condition', 'crypto',
-        }
-        for vuln in v:
-            if vuln.lower() not in valid_types:
-                raise ValueError(f'Unknown vulnerability type: {vuln}')
-        return [vuln.lower() for vuln in v]
+    def validate_vulnerabilities_compat(cls, v: List[str]) -> List[str]:
+        """
+        向后兼容：旧字段名 target_vulnerabilities 现在被视为 target_defects。
+        允许用户仍传旧字段，但值必须是运行缺陷类型集合。
+        """
+        return cls.validate_defects(v)
 
 
 class ToolInput(BaseModel):
@@ -248,7 +269,7 @@ class CodeAnalysisInput(ToolInput):
     @field_validator('analysis_type')
     @classmethod
     def validate_analysis_type(cls, v: str) -> str:
-        valid_types = {'full', 'quick', 'security', 'dataflow'}
+        valid_types = {'full', 'quick', 'defect', 'dataflow'}
         if v.lower() not in valid_types:
             raise ValueError(f'Invalid analysis type: {v}')
         return v.lower()

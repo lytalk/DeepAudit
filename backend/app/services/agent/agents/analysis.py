@@ -373,7 +373,7 @@ class AnalysisAgent(BaseAgent):
     
     async def run(self, input_data: Dict[str, Any]) -> AgentResult:
         """
-        执行漏洞分析 - LLM 全程参与！
+        执行缺陷分析 - LLM 全程参与！
         """
         import time
         start_time = time.time()
@@ -656,7 +656,7 @@ Final Answer: {{"findings": [...], "summary": "..."}}"""
             
             # 🔥 如果循环结束但没有发现，强制 LLM 总结
             if not all_findings and not self.is_cancelled and not error_message:
-                await self.emit_thinking("📝 分析阶段结束，正在生成漏洞总结...")
+                await self.emit_thinking("📝 分析阶段结束，正在生成缺陷总结...")
                 
                 # 添加强制总结的提示
                 self._conversation_history.append({

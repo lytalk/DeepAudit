@@ -35,7 +35,6 @@ CORE_AUDIT_PRINCIPLES = """
 - 创建的本地线程未销毁或未管理
 
 ### 5. 上下文感知分析
-=======
 ### 1. 深度分析优于广度扫描
 - 深入分析少数真实缺陷比报告大量误报更有价值
 - 每个发现都需要上下文验证
@@ -128,78 +127,81 @@ DEFECT_PRIORITIES = """
    - Optional.get() 未先调用 isPresent()
    - 可能为 null 的参数直接使用
 
-2. **未捕获异常或异常处理不完整**
-   - catch 块为空，异常被静默吞掉
-   - 仅打印堆栈未做恢复处理
-   - 捕获 Throwable 掩盖 OOM/StackOverflow
 
-3. **系统资源未关闭或释放**
+2. **系统资源未关闭或释放**
    - IO 流未在 finally/try-with-resources 中关闭
    - 数据库连接/会话未及时释放
    - 文件句柄泄露
 
-4. **无限递归或深度递归**
+3. **无限递归或深度递归**
    - 方法直接调用自身无终止条件
    - 递归终止条件不完备
    - 递归深度无限制
 
-5. **死循环或逻辑阻塞**
-   - while(true) 无 break/return/throw
-   - 循环条件永远为真
-   - Thread.sleep() 做轮询阻塞线程
-
-6. **内存溢出 OOM**
+4. **内存溢出 OOM**
    - 循环中向集合无限添加元素
    - 大对象反复创建未复用
    - 未限制缓存大小
 
-### 🟠 High - 性能隐患
-7. **循环中数据库查询（N+1 问题）**
-   - 循环内调用 Mapper/DAO 方法
-   - for 循环中 JdbcTemplate 执行查询
-   - 未使用批量查询替代循环单查
-
-8. **循环中远程服务调用**
-   - 循环内 HTTP 远程调用
-   - for 循环中调用 Feign/RestTemplate
-   - 未合并批量调用
-
-9. **大对象反复创建**
-   - 循环内 new StringBuilder()
-   - 循环内频繁创建对象增加 GC 压力
-   - 未复用对象或使用对象池
-
-10. **未限制查询数据量**
-    - SQL 查询无 LIMIT/分页
-    - findAll() 无 Pageable 参数
-    - 可能一次加载全表数据
-
-11. **全表扫描风险**
-    - LIKE '%keyword' 前缀通配导致索引失效
-    - 查询条件使用非索引字段
-    - 缺少必要索引
-
-12. **锁粒度过大**
-    - 整个方法加 synchronized
-    - synchronized(this) 包含大量逻辑
-    - 未使用细粒度锁方案
-
-### 🟡 Medium - 并发问题
-13. **非线程安全集合**
-    - 多线程环境使用 HashMap
-    - 静态字段使用 ArrayList/HashSet
-    - 未使用并发安全的数据结构
-
-14. **线程池无界队列**
+5. **线程池无界队列**
     - LinkedBlockingQueue 未指定容量
     - Executors.newFixedThreadPool 使用无界队列
     - 缺少拒绝策略导致任务堆积
 
-### 🟢 Low - 资源泄露
-15. **IO 流未关闭** - FileReader/FileWriter/BufferedReader
-16. **JDBC 连接未关闭** - Connection/ResultSet 泄露
-17. **ThreadLocal 未 remove** - 线程池场景数据污染
-18. **直接 new Thread** - 脱离线程池管理
+### 🟠 High - 资源泄漏和性能隐患
+6. **IO 流未关闭** - FileReader/FileWriter/BufferedReader
+
+7. **JDBC 连接未关闭** - Connection/ResultSet 泄露
+
+8. **ThreadLocal 未 remove** - 线程池场景数据污染
+
+9. **直接 new Thread** - 脱离线程池管理
+
+10. **循环中数据库查询（N+1 问题）**
+   - 循环内调用 Mapper/DAO 方法
+   - for 循环中 JdbcTemplate 执行查询
+   - 未使用批量查询替代循环单查
+
+11**循环中远程服务调用**
+   - 循环内 HTTP 远程调用
+   - for 循环中调用 Feign/RestTemplate
+   - 未合并批量调用
+
+12**大对象反复创建**
+   - 循环内 new StringBuilder()
+   - 循环内频繁创建对象增加 GC 压力
+   - 未复用对象或使用对象池
+
+13**未限制查询数据量**
+    - SQL 查询无 LIMIT/分页
+    - findAll() 无 Pageable 参数
+    - 可能一次加载全表数据
+
+14 **全表扫描风险**
+    - LIKE '%keyword' 前缀通配导致索引失效
+    - 查询条件使用非索引字段
+    - 缺少必要索引
+
+15 **锁粒度过大**
+    - 整个方法加 synchronized
+    - synchronized(this) 包含大量逻辑
+    - 未使用细粒度锁方案
+
+16**死循环或逻辑阻塞**
+   - while(true) 无 break/return/throw
+   - 循环条件永远为真
+   - Thread.sleep() 做轮询阻塞线程
+
+### 🟡 Medium - 并发问题
+17 **非线程安全集合**
+    - 多线程环境使用 HashMap
+    - 静态字段使用 ArrayList/HashSet
+    - 未使用并发安全的数据结构
+
+18**未捕获异常或异常处理不完整**
+   - catch 块为空，异常被静默吞掉
+   - 仅打印堆栈未做恢复处理
+   - 捕获 Throwable 掩盖 OOM/StackOverflow
 </defect_priorities>
 """
 

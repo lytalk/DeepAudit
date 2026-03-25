@@ -1,7 +1,7 @@
 """
-漏洞报告工具
+缺陷报告工具
 
-正式记录漏洞的唯一方式，确保漏洞报告的规范性和完整性。
+正式记录缺陷的唯一方式，确保缺陷报告的规范性和完整性。
 """
 
 import logging
@@ -17,18 +17,18 @@ logger = logging.getLogger(__name__)
 
 
 class VulnerabilityReportInput(BaseModel):
-    """漏洞报告输入参数"""
-    title: str = Field(..., description="漏洞标题")
+    """缺陷报告输入参数（字段名保持兼容）"""
+    title: str = Field(..., description="缺陷标题")
     vulnerability_type: str = Field(
         ..., 
-        description="漏洞类型: sql_injection, xss, ssrf, command_injection, path_traversal, idor, auth_bypass, etc."
+        description="缺陷类型: null_pointer, unhandled_exception, resource_leak, n_plus_one_query, deadlock, oom, performance_issue, concurrency_issue, etc."
     )
     severity: str = Field(
         ..., 
         description="严重程度: critical, high, medium, low, info"
     )
-    description: str = Field(..., description="漏洞详细描述")
-    file_path: str = Field(..., description="漏洞所在文件路径")
+    description: str = Field(..., description="缺陷详细描述")
+    file_path: str = Field(..., description="缺陷所在文件路径")
     line_start: Optional[int] = Field(default=None, description="起始行号")
     line_end: Optional[int] = Field(default=None, description="结束行号")
     code_snippet: Optional[str] = Field(default=None, description="相关代码片段")
@@ -44,13 +44,13 @@ class VulnerabilityReportInput(BaseModel):
 
 class CreateVulnerabilityReportTool(AgentTool):
     """
-    创建漏洞报告工具
+    创建缺陷报告工具（工具名保持兼容）
 
-    这是正式记录漏洞的唯一方式。只有通过这个工具创建的漏洞才会被计入最终报告。
-    这个设计确保了漏洞报告的规范性和完整性。
+    这是正式记录缺陷的唯一方式。只有通过这个工具创建的缺陷才会被计入最终报告。
+    这个设计确保了缺陷报告的规范性和完整性。
 
     通常只有专门的报告Agent或验证Agent才会调用这个工具，
-    确保漏洞在被正式报告之前已经经过了充分的验证。
+    确保缺陷在被正式报告之前已经经过了充分的验证。
 
     🔥 v2.1: 添加文件路径验证，拒绝报告不存在的文件
     """
@@ -69,16 +69,16 @@ class CreateVulnerabilityReportTool(AgentTool):
     
     @property
     def description(self) -> str:
-        return """创建正式的漏洞报告。这是记录已确认漏洞的唯一方式。
+        return """创建正式的缺陷报告。这是记录已确认缺陷的唯一方式。
 
 只有在以下情况下才应该使用此工具：
-1. 漏洞已经过充分分析和验证
-2. 有明确的证据支持漏洞存在
-3. 已经评估了漏洞的影响
+1. 缺陷已经过充分分析和验证
+2. 有明确的证据支持缺陷存在
+3. 已经评估了缺陷的影响
 
 必需参数:
-- title: 漏洞标题
-- vulnerability_type: 漏洞类型
+- title: 缺陷标题
+- vulnerability_type: 缺陷类型
 - severity: 严重程度 (critical/high/medium/low/info)
 - description: 详细描述
 - file_path: 文件路径
@@ -118,7 +118,7 @@ class CreateVulnerabilityReportTool(AgentTool):
         cvss_score: Optional[float] = None,
         **kwargs
     ) -> ToolResult:
-        """创建漏洞报告"""
+        """创建缺陷报告"""
         
         # 验证必需字段
         if not title or not title.strip():
@@ -143,7 +143,7 @@ class CreateVulnerabilityReportTool(AgentTool):
                     return ToolResult(
                         success=False,
                         error=f"无法创建报告：文件 '{file_path}' 在项目中不存在。"
-                              f"请先使用 read_file 工具验证文件存在，然后再报告漏洞。"
+                              f"请先使用 read_file 工具验证文件存在，然后再报告缺陷。"
                     )
 
         # 验证严重程度
@@ -155,14 +155,14 @@ class CreateVulnerabilityReportTool(AgentTool):
                 error=f"无效的严重程度 '{severity}'，必须是: {', '.join(valid_severities)}"
             )
         
-        # 验证漏洞类型
+        # 验证缺陷类型（字段名保持 vulnerability_type 兼容）
         valid_types = [
-            "sql_injection", "nosql_injection", "xss", "ssrf", 
-            "command_injection", "code_injection", "path_traversal",
-            "file_inclusion", "idor", "auth_bypass", "broken_auth",
-            "sensitive_data_exposure", "hardcoded_secret", "weak_crypto",
-            "xxe", "deserialization", "race_condition", "business_logic",
-            "csrf", "open_redirect", "mass_assignment", "other"
+            "null_pointer", "unhandled_exception", "resource_leak",
+            "infinite_recursion", "deadlock", "oom",
+            "n_plus_one_query", "remote_call_in_loop", "unbounded_query",
+            "lock_granularity", "unsafe_collection", "unbounded_queue",
+            "performance_issue", "concurrency_issue", "memory_issue",
+            "other"
         ]
         vulnerability_type = vulnerability_type.lower()
         if vulnerability_type not in valid_types:
@@ -173,7 +173,7 @@ class CreateVulnerabilityReportTool(AgentTool):
         confidence = max(0.0, min(1.0, confidence))
         
         # 生成报告ID
-        report_id = f"vuln_{uuid.uuid4().hex[:8]}"
+        report_id = f"defect_{uuid.uuid4().hex[:8]}"
         
         # 构建报告
         report = {
@@ -216,7 +216,7 @@ class CreateVulnerabilityReportTool(AgentTool):
         return ToolResult(
             success=True,
             data={
-                "message": f"漏洞报告已创建: {severity_emoji} [{severity.upper()}] {title}",
+                "message": f"缺陷报告已创建: {severity_emoji} [{severity.upper()}] {title}",
                 "report_id": report_id,
                 "severity": severity,
             },
@@ -226,19 +226,18 @@ class CreateVulnerabilityReportTool(AgentTool):
     def _get_default_recommendation(self, vuln_type: str) -> str:
         """获取默认修复建议"""
         recommendations = {
-            "sql_injection": "使用参数化查询或ORM，避免字符串拼接构造SQL语句",
-            "xss": "对用户输入进行HTML实体编码，使用CSP策略，避免innerHTML",
-            "ssrf": "验证和限制目标URL，使用白名单，禁止访问内网地址",
-            "command_injection": "避免使用shell执行，使用参数列表传递命令，严格验证输入",
-            "path_traversal": "规范化路径后验证，使用白名单，限制访问目录",
-            "idor": "实现细粒度访问控制，验证资源所有权，使用UUID替代自增ID",
-            "auth_bypass": "加强认证逻辑，实现多因素认证，定期审计认证代码",
-            "hardcoded_secret": "使用环境变量或密钥管理服务存储敏感信息",
-            "weak_crypto": "使用强加密算法（AES-256, SHA-256+），避免MD5/SHA1",
-            "xxe": "禁用外部实体解析，使用安全的XML解析器配置",
-            "deserialization": "避免反序列化不可信数据，使用JSON替代pickle/yaml",
+            "null_pointer": "在使用对象前进行空值检查，使用 Optional 或空对象模式。",
+            "unhandled_exception": "补全异常处理逻辑，避免空 catch，必要时记录日志并上报。",
+            "resource_leak": "使用 try-with-resources (Java) 或 with 语句 (Python) 确保资源释放。",
+            "n_plus_one_query": "避免循环内单条查询，使用批量查询或 JOIN 优化。",
+            "remote_call_in_loop": "合并批量调用，或使用异步并行请求减少累计耗时。",
+            "unbounded_query": "添加 LIMIT/分页参数，限制单次查询数据量。",
+            "unsafe_collection": "并发场景使用线程安全集合（ConcurrentHashMap 等）或加锁保护。",
+            "unbounded_queue": "为线程池队列设置容量上限，并配置拒绝策略。",
+            "deadlock": "统一锁获取顺序，避免嵌套锁，必要时使用 tryLock+超时。",
+            "oom": "限制集合/缓存大小，避免循环中创建大对象，优化内存占用。",
         }
-        return recommendations.get(vuln_type, "请根据具体情况修复此安全问题")
+        return recommendations.get(vuln_type, "请根据具体情况修复此代码缺陷")
     
     def get_reports(self) -> List[Dict[str, Any]]:
         """获取所有报告"""

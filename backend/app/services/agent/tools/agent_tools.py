@@ -25,7 +25,7 @@ class CreateAgentInput(BaseModel):
     )
     knowledge_modules: Optional[str] = Field(
         default=None,
-        description="知识模块，逗号分隔，最多5个。如: sql_injection,xss,authentication"
+        description="知识模块，逗号分隔，最多5个。如: stability,performance,concurrency,resource_leak"
     )
     inherit_context: bool = Field(
         default=True,
@@ -93,15 +93,15 @@ class CreateSubAgentTool(AgentTool):
         return """创建专业化的子Agent来处理特定任务。
 
 使用场景：
-1. 发现需要深入分析的特定漏洞类型
+1. 发现需要深入分析的特定缺陷类型（稳定性/性能/并发/资源）
 2. 需要专业知识来验证某个发现
 3. 任务过于复杂需要分解
 
 参数:
-- name: Agent名称（如 "SQL注入专家"）
+- name: Agent名称（如 "稳定性缺陷专家"）
 - task: 具体任务描述
 - agent_type: Agent类型 (analysis/verification/specialist)
-- knowledge_modules: 知识模块，逗号分隔（如 "sql_injection,database_security"）
+- knowledge_modules: 知识模块，逗号分隔（如 "stability,resource_leak"）
 - inherit_context: 是否继承当前上下文
 - execute_immediately: 是否立即执行（默认false，仅创建）
 - context: 传递给子Agent的上下文数据

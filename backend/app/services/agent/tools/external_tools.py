@@ -115,6 +115,9 @@ class SemgrepTool(AgentTool):
         "rules/performance.yaml",
         "rules/concurrency-and-resource.yaml",
     ]
+
+    # 镜像内置规则路径（当被扫描项目未包含 rules/ 时自动回退）
+    IMAGE_RULES_DIR = "/opt/deepaudit-rules"
     
     def __init__(self, project_root: str, sandbox_manager: Optional["SandboxManager"] = None):
         super().__init__()
@@ -177,16 +180,34 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
         )
         if error_msg:
             return ToolResult(success=False, data=error_msg, error=error_msg)
+
+        # 🔥 规则路径兼容：被扫描项目通常不包含 DeepAudit 的 rules/，此时回退到镜像内置规则
+        resolved_rules = rules
+        if resolved_rules in ("", ".", "./"):
+            resolved_rules = "rules/"
+
+        if resolved_rules == "auto":
+            # auto 也优先本地 rules/，不存在则用镜像内置规则
+            resolved_rules = "rules/"
+
+        if resolved_rules.startswith("p/"):
+            # 禁用远程规则：统一回退到本地规则（规则不存在再用镜像内置规则）
+            logger.warning(f"[Semgrep] 收到远程规则集 '{resolved_rules}'，已自动切换为本地规则 'rules/'")
+            resolved_rules = "rules/"
+
+        # 如果传的是相对 rules/ 路径，检查宿主机挂载目录下是否存在；不存在则改用镜像路径
+        if not os.path.isabs(resolved_rules):
+            host_rules_path = os.path.join(self.project_root, resolved_rules.rstrip("/"))
+            if not os.path.exists(host_rules_path):
+                logger.warning(
+                    f"[Semgrep] 规则路径在被扫描项目中不存在: {resolved_rules} "
+                    f"(host={host_rules_path})，回退到镜像内置规则: {self.IMAGE_RULES_DIR}"
+                )
+                resolved_rules = self.IMAGE_RULES_DIR
         
         cmd = ["semgrep", "--json", "--quiet"]
         
-        if rules == "auto":
-            cmd.extend(["--config", "rules/"])
-        elif rules.startswith("p/"):
-            logger.warning(f"[Semgrep] 收到远程规则集 '{rules}'，已自动切换为本地规则 'rules/'")
-            cmd.extend(["--config", "rules/"])
-        else:
-            cmd.extend(["--config", rules])
+        cmd.extend(["--config", resolved_rules])
         
         if severity:
             cmd.extend(["--severity", severity])
@@ -258,12 +279,12 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
             if not findings:
                 return ToolResult(
                     success=True,
-                    data=f"Semgrep 扫描完成，未发现代码缺陷 (规则集: {rules})",
-                    metadata={"findings_count": 0, "rules": rules}
+                    data=f"Semgrep 扫描完成，未发现代码缺陷 (规则集: {resolved_rules})",
+                    metadata={"findings_count": 0, "rules": resolved_rules}
                 )
             
             # 格式化输出
-            output_parts = [f"🔍 Semgrep 扫描结果 (规则集: {rules})\n"]
+            output_parts = [f"🔍 Semgrep 扫描结果 (规则集: {resolved_rules})\n"]
             output_parts.append(f"发现 {len(findings)} 个问题:\n")
             
             severity_icons = {"ERROR": "🔴", "WARNING": "🟠", "INFO": "🟡"}
@@ -286,7 +307,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
                 data="\n".join(output_parts),
                 metadata={
                     "findings_count": len(findings),
-                    "rules": rules,
+                    "rules": resolved_rules,
                     "findings": findings[:10],
                 }
             )

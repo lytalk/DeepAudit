@@ -83,8 +83,8 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     rm gitleaks.tar.gz
 
 # 安装 TruffleHog
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+RUN  \
+    curl -L https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
 
 # 安装 OSV-Scanner
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
@@ -107,7 +107,8 @@ ENV PYTHONUNBUFFERED=1
 
 # 限制 Python 导入路径
 ENV PYTHONPATH=/workspace
-
+COPY rules/ /opt/deepaudit-rules/
+ENV DEEPAUDIT_RULES_DIR=/opt/deepaudit-rules
 # 切换到非 root 用户
 USER sandbox
 

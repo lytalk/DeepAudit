@@ -1,7 +1,7 @@
 """
 扫描完成工具
 
-用于主Agent结束安全审计任务，确保所有子Agent已完成。
+用于主Agent结束代码质量审查任务，确保所有子Agent已完成。
 """
 
 import logging
@@ -19,7 +19,7 @@ class FinishScanInput(BaseModel):
     """扫描完成输入参数"""
     content: str = Field(
         ..., 
-        description="最终扫描报告内容，包含所有发现的漏洞总结"
+        description="最终扫描报告内容，包含所有发现的缺陷总结"
     )
     success: bool = Field(
         default=True, 
@@ -31,7 +31,7 @@ class FinishScanTool(AgentTool):
     """
     扫描完成工具
     
-    只有根Agent（主Agent）才能使用此工具来正式结束安全审计任务。
+    只有根Agent（主Agent）才能使用此工具来正式结束代码质量审查任务。
     
     使用前置条件：
     1. 所有子Agent必须已完成（completed, failed, 或 stopped 状态）
@@ -54,7 +54,7 @@ class FinishScanTool(AgentTool):
     
     @property
     def description(self) -> str:
-        return """完成整个安全扫描并生成最终报告。
+        return """完成整个代码质量审查并生成最终报告。
 
 只有根Agent（主编排Agent）才能使用此工具。
 
@@ -65,7 +65,7 @@ class FinishScanTool(AgentTool):
 参数:
 - content: 最终扫描报告内容，包含：
   - 扫描概述
-  - 发现的漏洞列表
+  - 发现的缺陷列表
   - 风险评估
   - 修复建议
 - success: 扫描是否成功完成
@@ -264,8 +264,33 @@ class FinishScanTool(AgentTool):
                                 }
                                 all_findings.append(finding)
                             elif isinstance(finding, str):
+                                # 兼容字符串格式发现：尽力提取 file_path 与 line_start，避免报告中缺少文件名/行号
+                                file_path = ""
+                                line_start = None
+                                text = finding.strip()
+                                # 常见格式: "path/to/file.py:123 - xxx" / "file.java:45 xxx"
+                                if ":" in text:
+                                    left, right = text.split(":", 1)
+                                    potential_file = left.strip()
+                                    if (
+                                        potential_file
+                                        and " " not in potential_file
+                                        and "." in potential_file
+                                        and len(potential_file) < 200
+                                    ):
+                                        file_path = potential_file
+                                        right_strip = right.strip()
+                                        # 行号通常在冒号后第一个 token
+                                        first_token = right_strip.split()[0] if right_strip else ""
+                                        if first_token.isdigit():
+                                            line_start = int(first_token)
+
                                 all_findings.append({
-                                    "description": finding,
+                                    "description": text,
+                                    "file_path": file_path,
+                                    "line_start": line_start,
+                                    # 保持字段名兼容：报告展示可用 vulnerability_type 作为缺陷类型
+                                    "vulnerability_type": "potential_issue",
                                     "discovered_by": {
                                         "agent_id": agent_id,
                                         "agent_name": node.get("name", "Unknown"),
@@ -295,8 +320,8 @@ class FinishScanTool(AgentTool):
                 severity_counts[severity] += 1
             
             # 统计类型
-            vuln_type = finding.get("vulnerability_type", finding.get("type", "unknown"))
-            type_counts[vuln_type] = type_counts.get(vuln_type, 0) + 1
+            defect_type = finding.get("vulnerability_type", finding.get("type", "unknown"))
+            type_counts[defect_type] = type_counts.get(defect_type, 0) + 1
         
         return {
             "total": len(findings),
