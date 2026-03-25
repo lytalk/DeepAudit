@@ -1,6 +1,6 @@
 """
-外部安全工具集成
-集成 Semgrep、Bandit、Gitleaks、TruffleHog、npm audit 等专业安全工具
+外部代码分析工具集成
+集成 Semgrep、Bandit 等专业代码静态分析工具，用于运行缺陷检测和代码质量审查
 """
 
 import asyncio
@@ -85,8 +85,8 @@ class SemgrepInput(BaseModel):
         description="要扫描的路径。⚠️ 重要：使用 '.' 扫描整个项目（推荐），或使用 'src/' 等子目录。不要使用项目目录名如 'PHP-Project'！"
     )
     rules: Optional[str] = Field(
-        default="p/security-audit",
-        description="规则集: p/security-audit, p/owasp-top-ten, p/r2c-security-audit"
+        default="rules/",
+        description="规则集路径: 'rules/' 使用本地自定义规则（推荐），'rules/stability.yaml' 针对稳定性，'rules/performance.yaml' 针对性能，'rules/concurrency-and-resource.yaml' 针对并发和资源"
     )
     severity: Optional[str] = Field(
         default=None,
@@ -100,31 +100,20 @@ class SemgrepTool(AgentTool):
     Semgrep 静态分析工具
     
     Semgrep 是一款快速、轻量级的静态分析工具，支持多种编程语言。
-    提供丰富的安全规则库，可以检测各种安全漏洞。
+    使用本地自定义规则集进行运行缺陷检测，不依赖网络下载规则。
     
-    官方规则集:
-    - p/security-audit: 综合安全审计
-    - p/owasp-top-ten: OWASP Top 10 漏洞
-    - p/r2c-security-audit: R2C 安全审计规则
-    - p/python: Python 特定规则
-    - p/javascript: JavaScript 特定规则
+    本地规则集（/workspace/rules/）:
+    - rules/: 全部自定义规则（推荐）
+    - rules/stability.yaml: 稳定性风险检测（空指针、异常处理、递归等）
+    - rules/performance.yaml: 性能隐患检测（循环查询、大对象、全表扫描等）
+    - rules/concurrency-and-resource.yaml: 并发问题和资源泄露检测
     """
     
-    AVAILABLE_RULESETS = [
-        "p/security-audit",
-        "p/owasp-top-ten",
-        "p/r2c-security-audit",
-        "p/python",
-        "p/javascript",
-        "p/typescript",
-        "p/java",
-        "p/go",
-        "p/php",
-        "p/ruby",
-        "p/secrets",
-        "p/sql-injection",
-        "p/xss",
-        "p/command-injection",
+    LOCAL_RULESETS = [
+        "rules/",
+        "rules/stability.yaml",
+        "rules/performance.yaml",
+        "rules/concurrency-and-resource.yaml",
     ]
     
     def __init__(self, project_root: str, sandbox_manager: Optional["SandboxManager"] = None):
@@ -140,23 +129,24 @@ class SemgrepTool(AgentTool):
     
     @property
     def description(self) -> str:
-        return """使用 Semgrep 进行静态安全分析。
+        return """使用 Semgrep 进行静态代码缺陷分析。
 Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
+使用本地自定义规则，无需网络下载。
 
 ⚠️ 重要提示:
 - target_path 使用 '.' 扫描整个项目（推荐）
 - 或使用子目录如 'src/'、'app/' 等
 - 不要使用项目目录名（如 'PHP-Project'、'MyApp'）！
 
-可用规则集:
-- p/security-audit: 综合安全审计（推荐）
-- p/owasp-top-ten: OWASP Top 10 漏洞检测
-- p/secrets: 密钥泄露检测
-- p/sql-injection: SQL 注入检测
+本地规则集:
+- rules/: 全部自定义规则（推荐）
+- rules/stability.yaml: 稳定性风险（空指针、异常处理、递归）
+- rules/performance.yaml: 性能隐患（循环查询、大对象创建）
+- rules/concurrency-and-resource.yaml: 并发和资源泄露
 
 使用场景:
-- 快速全面的代码安全扫描
-- 检测常见安全漏洞模式"""
+- 快速全面的代码质量扫描
+- 检测运行缺陷模式（稳定性、性能、并发、资源泄露）"""
     
     @property
     def args_schema(self):
@@ -165,7 +155,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
     async def _execute(
         self,
         target_path: str = ".",
-        rules: str = "p/security-audit",
+        rules: str = "rules/",
         severity: Optional[str] = None,
         max_results: int = 50,
         **kwargs
@@ -177,7 +167,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
             error_msg = f"Semgrep unavailable: {self.sandbox_manager.get_diagnosis()}"
             return ToolResult(
                 success=False,
-                data=error_msg,  # 🔥 修复：设置 data 字段避免 None
+                data=error_msg,
                 error=error_msg
             )
 
@@ -191,10 +181,10 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
         cmd = ["semgrep", "--json", "--quiet"]
         
         if rules == "auto":
-            # 🔥 Fallback if user explicitly requests 'auto', but prefer security-audit
-            cmd.extend(["--config", "p/security-audit"])
+            cmd.extend(["--config", "rules/"])
         elif rules.startswith("p/"):
-            cmd.extend(["--config", rules])
+            logger.warning(f"[Semgrep] 收到远程规则集 '{rules}'，已自动切换为本地规则 'rules/'")
+            cmd.extend(["--config", "rules/"])
         else:
             cmd.extend(["--config", rules])
         
@@ -206,12 +196,15 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
         
         cmd_str = " ".join(cmd)
         
+        # 🔥 使用本地规则，需要确认规则目录存在
+        use_network = rules.startswith("p/")
+        
         try:
             result = await self.sandbox_manager.execute_tool_command(
                 command=cmd_str,
                 host_workdir=self.project_root,
                 timeout=300,
-                network_mode="bridge"  # 🔥 Semgrep 需要网络来下载规则
+                network_mode="none"  # 🔥 使用本地规则，无需网络
             )
 
             # 🔥 添加调试日志
@@ -265,7 +258,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
             if not findings:
                 return ToolResult(
                     success=True,
-                    data=f"Semgrep 扫描完成，未发现安全问题 (规则集: {rules})",
+                    data=f"Semgrep 扫描完成，未发现代码缺陷 (规则集: {rules})",
                     metadata={"findings_count": 0, "rules": rules}
                 )
             
@@ -322,14 +315,14 @@ class BanditInput(BaseModel):
 
 class BanditTool(AgentTool):
     """
-    Bandit Python 安全扫描工具
+    Bandit Python 代码分析工具
     
-    Bandit 是专门用于 Python 代码的安全分析工具，
-    可以检测常见的 Python 安全问题，如：
-    - 硬编码密码
-    - SQL 注入
-    - 命令注入
-    - 不安全的随机数生成
+    Bandit 是专门用于 Python 代码的静态分析工具，
+    可以检测常见的 Python 代码质量问题，如：
+    - 不安全的函数调用（eval、exec）
+    - 异常处理问题
+    - 资源管理问题
+    - 潜在的运行时错误
     - 不安全的反序列化
     """
     
@@ -346,16 +339,16 @@ class BanditTool(AgentTool):
     
     @property
     def description(self) -> str:
-        return """使用 Bandit 扫描 Python 代码的安全问题。
-Bandit 是 Python 专用的安全分析工具。
+        return """使用 Bandit 扫描 Python 代码的质量问题。
+Bandit 是 Python 专用的静态代码分析工具。
 
 ⚠️ 重要提示: target_path 使用 '.' 扫描整个项目，不要使用项目目录名！
 
 检测项目:
-- shell/SQL 注入
-- 硬编码密码
-- 不安全的反序列化
-- SSL/TLS 问题
+- 危险函数调用（eval/exec/os.system）
+- 异常处理缺陷
+- 资源管理问题
+- 潜在的运行时错误
 
 仅适用于 Python 项目。"""
     
@@ -421,11 +414,11 @@ Bandit 是 Python 专用的安全分析工具。
             if not findings:
                 return ToolResult(
                     success=True,
-                    data="Bandit 扫描完成，未发现 Python 安全问题",
+                    data="Bandit 扫描完成，未发现 Python 代码缺陷",
                     metadata={"findings_count": 0}
                 )
             
-            output_parts = ["🐍 Bandit Python 安全扫描结果\n"]
+            output_parts = ["🐍 Bandit Python 代码分析结果\n"]
             output_parts.append(f"发现 {len(findings)} 个问题:\n")
             
             severity_icons = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡"}

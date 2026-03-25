@@ -3,9 +3,9 @@ Agent Prompts 模块
 
 提供专业化的系统提示词模板，参考业界最佳实践设计。
 支持：
-- 漏洞类型特定知识模块
+- 运行缺陷类型特定知识模块
 - 动态模块加载
-- 代码审计最佳实践
+- 代码质量审查最佳实践
 """
 
 from pathlib import Path
@@ -111,7 +111,7 @@ def generate_modules_description() -> str:
     
     return (
         f"可用的知识模块 (最多5个): {modules_str}. "
-        f"示例: sql_injection, xss 用于特定漏洞类型分析"
+        f"示例: stability, performance 用于特定缺陷类型分析"
     )
 
 
@@ -215,9 +215,11 @@ def build_specialized_prompt(
 
 # 导入系统提示词
 from .system_prompts import (
-    CORE_SECURITY_PRINCIPLES,
-    FILE_VALIDATION_RULES,  # 🔥 v2.1
-    VULNERABILITY_PRIORITIES,
+    CORE_AUDIT_PRINCIPLES,
+    CORE_SECURITY_PRINCIPLES,  # 向后兼容别名
+    FILE_VALIDATION_RULES,
+    DEFECT_PRIORITIES,
+    VULNERABILITY_PRIORITIES,  # 向后兼容别名
     TOOL_USAGE_GUIDE,
     MULTI_AGENT_RULES,
     build_enhanced_prompt,
@@ -234,9 +236,11 @@ __all__ = [
     "load_prompt_modules",
     "build_specialized_prompt",
     # 系统提示词
-    "CORE_SECURITY_PRINCIPLES",
-    "FILE_VALIDATION_RULES",  # 🔥 v2.1
-    "VULNERABILITY_PRIORITIES",
+    "CORE_AUDIT_PRINCIPLES",
+    "CORE_SECURITY_PRINCIPLES",  # 向后兼容别名
+    "FILE_VALIDATION_RULES",
+    "DEFECT_PRIORITIES",
+    "VULNERABILITY_PRIORITIES",  # 向后兼容别名
     "TOOL_USAGE_GUIDE",
     "MULTI_AGENT_RULES",
     "build_enhanced_prompt",

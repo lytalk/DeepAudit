@@ -1,10 +1,10 @@
 """
 智能批量扫描工具
-整合多种扫描能力，一次性完成多项安全检查
+整合多种扫描能力，一次性完成多项代码缺陷检查
 
 设计目的：
 1. 减少 LLM 需要做的工具调用次数
-2. 提供更完整的扫描概览
+2. 提供更完整的代码质量概览
 3. 自动选择最适合的扫描策略
 """
 
@@ -29,11 +29,11 @@ class SmartScanInput(BaseModel):
     )
     scan_types: Optional[List[str]] = Field(
         default=None,
-        description="扫描类型列表。可选: pattern, secret, dependency, all。默认为 all"
+        description="扫描类型列表。可选: pattern, all。默认为 all"
     )
-    focus_vulnerabilities: Optional[List[str]] = Field(
+    focus_defects: Optional[List[str]] = Field(
         default=None,
-        description="重点关注的漏洞类型，如 ['sql_injection', 'xss', 'command_injection']"
+        description="重点关注的缺陷类型，如 ['resource_leak', 'null_pointer', 'loop_db_query', 'unsafe_collection', 'unbounded_query']"
     )
     max_files: int = Field(default=50, description="最大扫描文件数")
     quick_mode: bool = Field(default=False, description="快速模式：只扫描高风险文件")
@@ -44,9 +44,11 @@ class SmartScanTool(AgentTool):
     智能批量扫描工具
     
     自动整合多种扫描能力：
-    - 危险模式匹配 (pattern)
-    - 密钥泄露检测 (secret)
-    - 依赖漏洞检查 (dependency)
+    - 运行缺陷模式匹配 (pattern)
+    - 稳定性风险检测
+    - 性能隐患检测
+    - 并发问题检测
+    - 资源泄露检测
     
     特点：
     1. 自动识别项目类型和技术栈
@@ -55,72 +57,96 @@ class SmartScanTool(AgentTool):
     4. 一次调用完成多项检查
     """
     
-    # 高风险文件模式
+    # 高风险文件模式（可能存在运行缺陷的区域）
     HIGH_RISK_PATTERNS = [
-        r'.*auth.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*login.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*user.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*api.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*view.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*route.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*controller.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*model.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*db.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*sql.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*upload.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*file.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*exec.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*admin.*\.(py|js|ts|tsx|jsx|java|php|swift|m|mm|kt|rs|go)$',
-        r'.*config.*\.(py|js|ts|tsx|jsx|json|yaml|yml|xml|properties|plist)$',
-        r'.*setting.*\.(py|js|ts|tsx|jsx|json|yaml|yml|xml|properties|plist)$',
-        r'.*secret.*\.(py|js|ts|tsx|jsx|json|yaml|yml|xml|properties|plist)$',
-        r'.*\.env.*$',
-        r'.*Info\.plist$',
-        r'.*AndroidManifest\.xml$',
+        r'.*service.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*dao.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*repository.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*controller.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*handler.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*manager.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*worker.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*task.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*thread.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*pool.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*cache.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*db.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*sql.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*file.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*stream.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*connection.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*batch.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*scheduler.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*queue.*\.(py|js|ts|tsx|jsx|java|php|kt|rs|go)$',
+        r'.*config.*\.(py|js|ts|tsx|jsx|json|yaml|yml|xml|properties)$',
     ]
     
-    # 危险模式库（精简版，用于快速扫描）
+    # 运行缺陷模式库（精简版，用于快速扫描）
     QUICK_PATTERNS = {
-        "sql_injection": [
-            (r'execute\s*\([^)]*%', "SQL格式化"),
-            (r'execute\s*\([^)]*\+', "SQL拼接"),
-            (r'execute\s*\(.*f["\']', "SQL f-string"),
-            (r'\.query\s*\([^)]*\+', "Query拼接"),
-            (r'raw\s*\([^)]*%', "Raw SQL"),
-            (r'sqlite3_exec\s*\(', "SQLite3 Exec"),
-            (r'NSPredicate\(format:', "NSPredicate Format"),
+        "null_pointer": [
+            (r'\.\w+\s*\.\w+\s*\.\w+', "深层链式调用（可能NPE）"),
+            (r'\.get\s*\([^)]*\)\s*\.', "get后直接调用（可能NPE）"),
+            (r'return\s+\w+\.\w+\(\)\.', "返回值链式调用（可能NPE）"),
         ],
-        "command_injection": [
-            (r'os\.system\s*\(', "os.system"),
-            (r'subprocess.*shell\s*=\s*True', "shell=True"),
-            (r'eval\s*\(', "eval()"),
-            (r'exec\s*\(', "exec()"),
-            (r'Process\s*\(\s*launchPath:', "Swift Process"),
-            (r'NSTask\s*\.launch', "NSTask Launch"),
+        "unhandled_exception": [
+            (r'except\s*:\s*$', "空异常捕获"),
+            (r'except\s+\w+.*:\s*\n\s*(pass|\.\.\.)', "异常被忽略"),
+            (r'catch\s*\(\s*\w+\s+\w+\s*\)\s*\{\s*\}', "空catch块"),
+            (r'catch\s*\(\s*Exception', "捕获过宽的异常"),
         ],
-        "xss": [
-            (r'innerHTML\s*=', "innerHTML"),
-            (r'v-html\s*=', "v-html"),
-            (r'dangerouslySetInnerHTML', "dangerouslySetInnerHTML"),
-            (r'\|\s*safe\b', "safe filter"),
-            (r'mark_safe\s*\(', "mark_safe"),
-            (r'loadHTMLString', "WebView Load HTML"),
-            (r'evaluateJavaScript', "WebView JS Exec"),
+        "resource_leak": [
+            (r'open\s*\([^)]*\)', "文件打开（检查是否关闭）"),
+            (r'new\s+File(?:Input|Output|Reader|Writer)', "Java文件流（检查是否关闭）"),
+            (r'DriverManager\.getConnection', "JDBC连接（检查是否关闭）"),
+            (r'\.getConnection\s*\(', "数据库连接获取"),
+            (r'new\s+(?:Buffered|Input|Output)Stream', "IO流创建（检查是否关闭）"),
+            (r'socket\s*\(', "Socket创建（检查是否关闭）"),
+            (r'createStatement\s*\(\)', "JDBC Statement（检查是否关闭）"),
         ],
-        "path_traversal": [
-            (r'open\s*\([^)]*\+', "open拼接"),
-            (r'send_file\s*\([^)]*request', "send_file"),
-            (r'include\s*\(\s*\$', "include变量"),
+        "loop_db_query": [
+            (r'for\s+.*:\s*\n[^}]*(?:execute|query|find|select|fetch)', "循环内数据库查询"),
+            (r'while\s+.*:\s*\n[^}]*(?:execute|query|find|select|fetch)', "循环内数据库查询"),
+            (r'\.forEach\s*\([^)]*\)\s*(?:->|=>)\s*\{[^}]*(?:query|find|save|delete)', "forEach内数据库操作"),
+            (r'for\s*\(.*\)\s*\{[^}]*(?:execute|query|find|select|fetch)', "循环内数据库查询"),
         ],
-        "hardcoded_secret": [
-            (r'password\s*=\s*["\'][^"\']{4,}["\']', "硬编码密码"),
-            (r'api_?key\s*=\s*["\'][^"\']{8,}["\']', "硬编码API Key"),
-            (r'secret\s*=\s*["\'][^"\']{8,}["\']', "硬编码Secret"),
-            (r'-----BEGIN.*PRIVATE KEY-----', "私钥"),
+        "remote_call_in_loop": [
+            (r'for\s+.*:\s*\n[^}]*(?:requests\.|http\.|fetch\(|\.get\(|\.post\()', "循环内远程调用"),
+            (r'for\s*\(.*\)\s*\{[^}]*(?:HttpClient|RestTemplate|WebClient)', "循环内HTTP调用"),
+            (r'\.forEach\s*\([^)]*\)\s*(?:->|=>)\s*\{[^}]*(?:http|fetch|request)', "forEach内远程调用"),
         ],
-        "ssrf": [
-            (r'requests\.(get|post)\s*\([^)]*request\.', "requests用户URL"),
-            (r'fetch\s*\([^)]*req\.', "fetch用户URL"),
+        "unbounded_query": [
+            (r'SELECT\s+\*\s+FROM\s+\w+\s*(?:;|$|")', "无LIMIT的全表查询"),
+            (r'\.findAll\s*\(\s*\)', "无条件全量查询"),
+            (r'\.find\s*\(\s*\{\s*\}\s*\)', "MongoDB无条件查询"),
+            (r'FROM\s+\w+\s+WHERE.*(?:LIKE\s+["\']%)', "LIKE模糊查询（可能全表扫描）"),
+        ],
+        "unsafe_collection": [
+            (r'new\s+HashMap\s*<', "HashMap（非线程安全）"),
+            (r'new\s+ArrayList\s*<', "ArrayList（非线程安全）"),
+            (r'new\s+HashSet\s*<', "HashSet（非线程安全）"),
+            (r'(?:static|shared|global)\s+.*(?:HashMap|ArrayList|HashSet|LinkedList)', "静态非线程安全集合"),
+        ],
+        "unbounded_thread_pool": [
+            (r'Executors\.newCachedThreadPool', "无界线程池"),
+            (r'new\s+LinkedBlockingQueue\s*\(\s*\)', "无界队列"),
+            (r'Executors\.newFixedThreadPool\s*\(\s*\d{3,}', "线程池过大"),
+            (r'new\s+Thread\s*\(', "直接创建线程（未使用线程池）"),
+            (r'ThreadLocal\s*<', "ThreadLocal（检查是否remove）"),
+        ],
+        "infinite_recursion": [
+            (r'def\s+(\w+)\s*\([^)]*\):[^}]*\1\s*\(', "Python可能的递归"),
+            (r'function\s+(\w+)\s*\([^)]*\)\s*\{[^}]*\1\s*\(', "JS可能的递归"),
+        ],
+        "large_object_creation": [
+            (r'for\s+.*:\s*\n[^}]*new\s+\w+\s*\(', "循环内创建对象"),
+            (r'new\s+byte\s*\[\s*\d{7,}\s*\]', "超大数组分配"),
+            (r'\.toArray\s*\(\s*\)', "集合转数组（大量数据时OOM风险）"),
+            (r'String\s*\+\s*=', "字符串拼接（循环中应使用StringBuilder）"),
+        ],
+        "lock_issue": [
+            (r'synchronized\s*\(\s*this\s*\)', "粗粒度锁（锁this）"),
+            (r'synchronized\s*\(\s*\w+\.class\s*\)', "类级别锁（过于宽泛）"),
+            (r'\.lock\s*\(\s*\)(?!.*finally)', "加锁但可能未在finally中释放"),
         ],
     }
     
@@ -134,24 +160,23 @@ class SmartScanTool(AgentTool):
     
     @property
     def description(self) -> str:
-        return """🚀 智能批量安全扫描工具 - 一次调用完成多项检查
+        return """🚀 智能批量代码缺陷扫描工具 - 一次调用完成多项检查
 
-这是 Analysis Agent 的首选工具！在分析开始时优先使用此工具获取项目安全概览。
+这是 Analysis Agent 的首选工具！在分析开始时优先使用此工具获取项目代码质量概览。
 
 功能：
-- 自动识别高风险文件
-- 批量检测多种漏洞模式
+- 自动识别高风险文件（可能存在运行缺陷的区域）
+- 批量检测多种缺陷模式（稳定性、性能、并发、资源泄露）
 - 按严重程度汇总结果
 - 支持快速模式和完整模式
 
 使用示例:
 - 快速全面扫描: {"target": ".", "quick_mode": true}
-- 扫描特定目录: {"target": "src/api", "scan_types": ["pattern"]}
-- 聚焦特定漏洞: {"target": ".", "focus_vulnerabilities": ["sql_injection", "xss"]}
+- 扫描特定目录: {"target": "src/service", "scan_types": ["pattern"]}
+- 聚焦特定缺陷: {"target": ".", "focus_defects": ["resource_leak", "loop_db_query"]}
 
 扫描类型:
-- pattern: 危险代码模式匹配
-- secret: 密钥泄露检测
+- pattern: 运行缺陷模式匹配
 - all: 所有类型（默认）
 
 输出：按风险级别分类的发现汇总，可直接用于制定进一步分析策略。"""
@@ -164,7 +189,7 @@ class SmartScanTool(AgentTool):
         self,
         target: str = ".",
         scan_types: Optional[List[str]] = None,
-        focus_vulnerabilities: Optional[List[str]] = None,
+        focus_defects: Optional[List[str]] = None,
         max_files: int = 50,
         quick_mode: bool = False,
         **kwargs
@@ -187,7 +212,7 @@ class SmartScanTool(AgentTool):
         files_with_issues = set()
         
         for file_path in files_to_scan:
-            file_findings = await self._scan_file(file_path, focus_vulnerabilities)
+            file_findings = await self._scan_file(file_path, focus_defects)
             if file_findings:
                 all_findings.extend(file_findings)
                 files_with_issues.add(file_path)
@@ -272,7 +297,7 @@ class SmartScanTool(AgentTool):
     async def _scan_file(
         self, 
         file_path: str,
-        focus_vulnerabilities: Optional[List[str]] = None
+        focus_defects: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """扫描单个文件"""
         full_path = os.path.join(self.project_root, file_path)
@@ -287,46 +312,49 @@ class SmartScanTool(AgentTool):
         lines = content.split('\n')
         findings = []
         
-        # 确定要检查的漏洞类型
-        vuln_types = focus_vulnerabilities or list(self.QUICK_PATTERNS.keys())
+        defect_types = focus_defects or list(self.QUICK_PATTERNS.keys())
         
-        for vuln_type in vuln_types:
-            patterns = self.QUICK_PATTERNS.get(vuln_type, [])
+        for defect_type in defect_types:
+            patterns = self.QUICK_PATTERNS.get(defect_type, [])
             
             for pattern, pattern_name in patterns:
                 try:
                     for i, line in enumerate(lines):
                         if re.search(pattern, line, re.IGNORECASE):
-                            # 获取上下文
                             start = max(0, i - 1)
                             end = min(len(lines), i + 2)
                             context = '\n'.join(lines[start:end])
                             
                             findings.append({
-                                "vulnerability_type": vuln_type,
+                                "defect_type": defect_type,
                                 "pattern_name": pattern_name,
                                 "file_path": file_path,
                                 "line_number": i + 1,
                                 "matched_line": line.strip()[:150],
                                 "context": context[:300],
-                                "severity": self._get_severity(vuln_type),
+                                "severity": self._get_severity(defect_type),
                             })
                 except re.error:
                     continue
         
         return findings
     
-    def _get_severity(self, vuln_type: str) -> str:
-        """获取漏洞严重程度"""
+    def _get_severity(self, defect_type: str) -> str:
+        """获取缺陷严重程度"""
         severity_map = {
-            "sql_injection": "high",
-            "command_injection": "critical",
-            "xss": "high",
-            "path_traversal": "high",
-            "ssrf": "high",
-            "hardcoded_secret": "medium",
+            "null_pointer": "high",
+            "unhandled_exception": "high",
+            "resource_leak": "critical",
+            "loop_db_query": "critical",
+            "remote_call_in_loop": "critical",
+            "unbounded_query": "high",
+            "unsafe_collection": "high",
+            "unbounded_thread_pool": "critical",
+            "infinite_recursion": "critical",
+            "large_object_creation": "medium",
+            "lock_issue": "high",
         }
-        return severity_map.get(vuln_type, "medium")
+        return severity_map.get(defect_type, "medium")
     
     def _generate_report(
         self,
@@ -343,17 +371,17 @@ class SmartScanTool(AgentTool):
             sev = f.get("severity", "medium")
             by_severity[sev].append(f)
         
-        # 按漏洞类型分组
+        # 按缺陷类型分组
         by_type = {}
         for f in findings:
-            vtype = f.get("vulnerability_type", "unknown")
-            if vtype not in by_type:
-                by_type[vtype] = []
-            by_type[vtype].append(f)
+            dtype = f.get("defect_type", "unknown")
+            if dtype not in by_type:
+                by_type[dtype] = []
+            by_type[dtype].append(f)
         
         # 构建报告
         output_parts = [
-            f"🔍 智能安全扫描报告",
+            f"🔍 智能代码缺陷扫描报告",
             f"{'(快速模式)' if quick_mode else '(完整模式)'}",
             "",
             f"📊 扫描概览:",
@@ -373,11 +401,11 @@ class SmartScanTool(AgentTool):
         
         output_parts.append("")
         
-        # 漏洞类型统计
+        # 缺陷类型统计
         if by_type:
-            output_parts.append("📋 按漏洞类型分布:")
-            for vtype, vfindings in sorted(by_type.items(), key=lambda x: -len(x[1])):
-                output_parts.append(f"  - {vtype}: {len(vfindings)}")
+            output_parts.append("📋 按缺陷类型分布:")
+            for dtype, dfindings in sorted(by_type.items(), key=lambda x: -len(x[1])):
+                output_parts.append(f"  - {dtype}: {len(dfindings)}")
         
         output_parts.append("")
         
@@ -386,11 +414,11 @@ class SmartScanTool(AgentTool):
             output_parts.append("⚠️ 重点发现 (按严重程度排序):")
             shown = 0
             for sev in ["critical", "high", "medium", "low"]:
-                for f in by_severity[sev][:5]:  # 每个级别最多5个
+                for f in by_severity[sev][:5]:
                     if shown >= 15:
                         break
                     icon = severity_icons[f["severity"]]
-                    output_parts.append(f"\n{icon} [{f['severity'].upper()}] {f['vulnerability_type']}")
+                    output_parts.append(f"\n{icon} [{f['severity'].upper()}] {f['defect_type']}")
                     output_parts.append(f"   📍 {f['file_path']}:{f['line_number']}")
                     output_parts.append(f"   🔍 模式: {f['pattern_name']}")
                     output_parts.append(f"   📝 代码: {f['matched_line'][:80]}")
@@ -406,9 +434,9 @@ class SmartScanTool(AgentTool):
         output_parts.append("💡 建议的下一步:")
         
         if by_severity["critical"]:
-            output_parts.append("  1. ⚠️ 优先处理 CRITICAL 级别问题 - 使用 read_file 深入分析")
+            output_parts.append("  1. ⚠️ 优先处理 CRITICAL 级别缺陷 - 使用 read_file 深入分析")
         if by_severity["high"]:
-            output_parts.append("  2. 🔍 分析 HIGH 级别问题的上下文和数据流")
+            output_parts.append("  2. 🔍 分析 HIGH 级别缺陷的上下文和数据流")
         if files_with_issues:
             top_files = list(files_with_issues)[:3]
             output_parts.append(f"  3. 📁 重点审查这些文件: {', '.join(top_files)}")
@@ -441,8 +469,8 @@ class QuickAuditTool(AgentTool):
     """
     快速文件审计工具
     
-    对单个文件进行全面的安全审计，包括：
-    - 模式匹配
+    对单个文件进行全面的代码质量审计，包括：
+    - 缺陷模式匹配
     - 上下文分析
     - 风险评估
     - 修复建议
@@ -458,22 +486,22 @@ class QuickAuditTool(AgentTool):
     
     @property
     def description(self) -> str:
-        return """🎯 快速文件审计工具 - 对单个文件进行全面安全分析
+        return """🎯 快速文件审计工具 - 对单个文件进行全面代码缺陷分析
 
 当 smart_scan 发现高风险文件后，使用此工具进行深入审计。
 
 功能：
-- 全面的模式匹配
+- 全面的缺陷模式匹配
 - 代码结构分析
 - 风险评估和优先级排序
 - 具体的修复建议
 
 使用示例:
-- {"file_path": "app/views.py", "deep_analysis": true}
+- {"file_path": "app/service/UserService.java", "deep_analysis": true}
 
 适用场景：
 - smart_scan 发现的高风险文件
-- 需要详细分析的可疑代码
+- 需要详细分析的可疑代码（资源泄露、性能问题等）
 - 生成具体的修复建议"""
     
     @property
@@ -525,10 +553,9 @@ class QuickAuditTool(AgentTool):
         pattern_tool = PatternMatchTool(self.project_root)
         
         # 使用完整的模式库进行扫描
-        for vuln_type, config in pattern_tool.PATTERNS.items():
+        for defect_type, config in pattern_tool.PATTERNS.items():
             patterns_dict = config.get("patterns", {})
             
-            # 检测语言
             ext = os.path.splitext(file_path)[1].lower()
             lang_map = {".py": "python", ".js": "javascript", ".ts": "javascript", 
                        ".php": "php", ".java": "java", ".go": "go"}
@@ -546,7 +573,7 @@ class QuickAuditTool(AgentTool):
                             context = '\n'.join(f"{start+j+1}: {lines[start+j]}" for j in range(end-start))
                             
                             finding = {
-                                "vulnerability_type": vuln_type,
+                                "defect_type": defect_type,
                                 "pattern_name": pattern_name,
                                 "severity": config.get("severity", "medium"),
                                 "line_number": i + 1,
@@ -556,9 +583,8 @@ class QuickAuditTool(AgentTool):
                                 "cwe_id": config.get("cwe_id", ""),
                             }
                             
-                            # 深度分析：添加修复建议
                             if deep_analysis:
-                                finding["recommendation"] = self._get_recommendation(vuln_type)
+                                finding["recommendation"] = self._get_recommendation(defect_type)
                             
                             audit_result["findings"].append(finding)
                 except re.error:
@@ -567,19 +593,22 @@ class QuickAuditTool(AgentTool):
         # 生成报告
         return self._format_audit_report(audit_result)
     
-    def _get_recommendation(self, vuln_type: str) -> str:
+    def _get_recommendation(self, defect_type: str) -> str:
         """获取修复建议"""
         recommendations = {
-            "sql_injection": "使用参数化查询或 ORM。例如: cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))",
-            "command_injection": "避免使用 shell=True，使用参数列表传递命令。验证和清理所有用户输入。",
-            "xss": "对所有用户输入进行 HTML 实体编码。使用框架自带的模板转义功能。",
-            "path_traversal": "使用白名单验证文件路径。确保路径不包含 .. 序列。使用 os.path.basename() 提取文件名。",
-            "ssrf": "验证 URL 白名单。禁止访问内部 IP 地址和保留地址。",
-            "hardcoded_secret": "使用环境变量或密钥管理服务存储敏感信息。",
-            "deserialization": "避免反序列化不可信数据。使用安全的序列化格式如 JSON。",
-            "weak_crypto": "使用 SHA-256 或更强的哈希算法。使用 AES-256-GCM 进行加密。",
+            "null_pointer": "在使用对象前进行空值检查，使用 Optional 或空对象模式避免 NPE。",
+            "unhandled_exception": "添加完整的异常处理逻辑，避免空 catch 块，确保资源在异常时正确释放。",
+            "resource_leak": "使用 try-with-resources (Java) 或 with 语句 (Python) 确保资源在 finally 中关闭。",
+            "loop_db_query": "使用批量查询（IN 子句/JOIN）替代循环内逐条查询，避免 N+1 问题。",
+            "remote_call_in_loop": "合并为批量调用，使用异步并行请求减少网络开销。",
+            "unbounded_query": "添加 LIMIT 分页参数，限制单次查询数据量，避免 OOM。",
+            "unsafe_collection": "使用 ConcurrentHashMap 替代 HashMap，使用 CopyOnWriteArrayList 或同步包装器。",
+            "unbounded_thread_pool": "指定 LinkedBlockingQueue 容量上限，配置拒绝策略。使用线程池管理线程。",
+            "infinite_recursion": "添加递归终止条件检查，限制递归深度，考虑使用迭代替代递归。",
+            "large_object_creation": "在循环外创建对象并复用，使用 StringBuilder 替代字符串拼接。",
+            "lock_issue": "缩小锁的作用范围，使用细粒度锁或读写锁，确保在 finally 中释放锁。",
         }
-        return recommendations.get(vuln_type, "请手动审查此代码段的安全性。")
+        return recommendations.get(defect_type, "请手动审查此代码段的运行质量。")
     
     def _format_audit_report(self, audit_result: Dict) -> ToolResult:
         """格式化审计报告"""
@@ -595,7 +624,7 @@ class QuickAuditTool(AgentTool):
         ]
         
         if not findings:
-            output_parts.append("✅ 未发现已知的安全问题")
+            output_parts.append("✅ 未发现已知的代码缺陷")
         else:
             # 按严重程度分组
             by_severity = {"critical": [], "high": [], "medium": [], "low": []}
@@ -604,13 +633,13 @@ class QuickAuditTool(AgentTool):
             
             severity_icons = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}
             
-            output_parts.append(f"⚠️ 发现 {len(findings)} 个潜在问题:")
+            output_parts.append(f"⚠️ 发现 {len(findings)} 个潜在缺陷:")
             output_parts.append("")
             
             for sev in ["critical", "high", "medium", "low"]:
                 for f in by_severity[sev]:
                     icon = severity_icons[sev]
-                    output_parts.append(f"{icon} [{sev.upper()}] {f['vulnerability_type']}")
+                    output_parts.append(f"{icon} [{sev.upper()}] {f['defect_type']}")
                     output_parts.append(f"   📍 第 {f['line_number']} 行: {f['pattern_name']}")
                     output_parts.append(f"   💻 代码: {f['matched_line'][:80]}")
                     if f.get("cwe_id"):

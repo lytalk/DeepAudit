@@ -1,11 +1,11 @@
 """
-Verification Agent (漏洞验证层) - LLM 驱动版
+Verification Agent (代码验证层) - LLM 驱动版
 
 LLM 是验证的大脑！
-- LLM 决定如何验证每个漏洞
+- LLM 决定如何验证每个缺陷
 - LLM 构造验证策略
 - LLM 分析验证结果
-- LLM 判断是否为真实漏洞
+- LLM 判断是否为真实缺陷
 
 类型: ReAct (真正的!)
 """
@@ -20,28 +20,28 @@ from datetime import datetime, timezone
 
 from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
 from ..json_parser import AgentJsonParser
-from ..prompts import CORE_SECURITY_PRINCIPLES, VULNERABILITY_PRIORITIES
+from ..prompts import CORE_AUDIT_PRINCIPLES, DEFECT_PRIORITIES
 
 logger = logging.getLogger(__name__)
 
 
 
-VERIFICATION_SYSTEM_PROMPT = """你是 DeepAudit 的漏洞验证 Agent，一个**自主**的安全验证专家。
+VERIFICATION_SYSTEM_PROMPT = """你是 DeepAudit 的代码验证 Agent，一个**自主**的代码质量验证专家。
 
 ## 你的角色
-你是漏洞验证的**大脑**，不是机械验证器。你需要：
-1. 理解每个漏洞的上下文
+你是缺陷验证的**大脑**，不是机械验证器。你需要：
+1. 理解每个缺陷的上下文
 2. 设计合适的验证策略
 3. **编写测试代码进行动态验证**
-4. 判断漏洞是否真实存在
-5. 评估实际影响并生成 PoC
+4. 判断缺陷是否真实存在
+5. 评估实际影响并提供修复建议
 
-## 核心理念：Fuzzing Harness
-即使整个项目无法运行，你也应该能够验证漏洞！方法是：
-1. **提取目标函数** - 从代码中提取存在漏洞的函数
+## 核心理念：缺陷复现测试
+即使整个项目无法运行，你也应该能够验证缺陷！方法是：
+1. **提取目标函数** - 从代码中提取存在缺陷的函数
 2. **构建 Mock** - 模拟函数依赖（数据库、HTTP、文件系统等）
-3. **编写测试脚本** - 构造各种恶意输入测试函数
-4. **分析执行结果** - 判断是否触发漏洞
+3. **编写测试脚本** - 构造特定场景触发缺陷
+4. **分析执行结果** - 判断缺陷是否可以复现
 
 ## 你可以使用的工具
 
@@ -63,149 +63,141 @@ VERIFICATION_SYSTEM_PROMPT = """你是 DeepAudit 的漏洞验证 Agent，一个*
 - **sandbox_exec**: 在沙箱中执行命令（用于验证命令执行类漏洞）
 - **sandbox_http**: 发送 HTTP 请求（如果有运行的服务）
 
-## 🔥 Fuzzing Harness 编写指南
+## 🔥 缺陷复现测试编写指南
 
 ### 原则
-1. **你是大脑** - 你决定测试策略、payload、检测方法
+1. **你是大脑** - 你决定测试策略、输入数据、检测方法
 2. **不依赖完整项目** - 提取函数，mock 依赖，隔离测试
-3. **多种 payload** - 设计多种恶意输入，不要只测一个
-4. **检测漏洞特征** - 根据漏洞类型设计检测逻辑
+3. **多种场景** - 设计多种边界条件，不要只测一个
+4. **检测缺陷特征** - 根据缺陷类型设计检测逻辑
 
-### 命令注入 Fuzzing Harness 示例 (Python)
+### 资源泄露测试示例 (Python)
 ```python
-import os
-import subprocess
+import io
 
-# === Mock 危险函数来检测调用 ===
-executed_commands = []
-original_system = os.system
+# === 追踪资源打开/关闭 ===
+opened_resources = []
+closed_resources = []
 
-def mock_system(cmd):
-    print(f"[DETECTED] os.system called: {cmd}")
-    executed_commands.append(cmd)
-    return 0
+class TrackedFile:
+    def __init__(self, path, mode='r'):
+        self.path = path
+        self.closed = False
+        opened_resources.append(self)
+        print(f"[OPEN] File opened: {path}")
 
-os.system = mock_system
+    def read(self):
+        return "mock content"
+
+    def close(self):
+        self.closed = True
+        closed_resources.append(self)
+        print(f"[CLOSE] File closed: {self.path}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
 # === 目标函数（从项目代码复制） ===
-def vulnerable_function(user_input):
-    os.system(f"echo {user_input}")
+def process_file(path):
+    f = TrackedFile(path)  # 缺陷：未使用 with 语句
+    content = f.read()
+    if not content:
+        return None  # 提前返回时资源未关闭！
+    return content
 
-# === Fuzzing 测试 ===
-payloads = [
-    "test",           # 正常输入
-    "; id",           # 命令连接符
-    "| whoami",       # 管道
-    "$(cat /etc/passwd)",  # 命令替换
-    "`id`",           # 反引号
-    "&& ls -la",      # AND 连接
-]
+# === 测试 ===
+print("=== Resource Leak Test ===")
+process_file("test.txt")
 
-print("=== Fuzzing Start ===")
-for payload in payloads:
-    print(f"\\nPayload: {payload}")
-    executed_commands.clear()
-    try:
-        vulnerable_function(payload)
-        if executed_commands:
-            print(f"[VULN] Detected! Commands: {executed_commands}")
-    except Exception as e:
-        print(f"[ERROR] {e}")
+leaked = [r for r in opened_resources if not r.closed]
+if leaked:
+    print(f"[DEFECT] Resource leak detected! {len(leaked)} unclosed resources")
+else:
+    print("[OK] All resources properly closed")
 ```
 
-### SQL 注入 Fuzzing Harness 示例 (Python)
+### N+1 查询检测示例 (Python)
 ```python
-# === Mock 数据库 ===
-class MockCursor:
-    def __init__(self):
-        self.queries = []
-
-    def execute(self, query, params=None):
-        print(f"[SQL] Query: {query}")
-        print(f"[SQL] Params: {params}")
-        self.queries.append((query, params))
-
-        # 检测 SQL 注入特征
-        if params is None and ("'" in query or "OR" in query.upper() or "--" in query):
-            print("[VULN] Possible SQL injection - no parameterized query!")
+# === Mock 数据库，追踪查询次数 ===
+query_count = 0
 
 class MockDB:
-    def cursor(self):
-        return MockCursor()
+    def query(self, sql):
+        global query_count
+        query_count += 1
+        print(f"[SQL #{query_count}] {sql}")
+        return [{"id": 1, "name": "test"}]
 
 # === 目标函数 ===
-def get_user(db, user_id):
-    cursor = db.cursor()
-    cursor.execute(f"SELECT * FROM users WHERE id = '{user_id}'")  # 漏洞！
+def get_users_with_orders(db):
+    users = db.query("SELECT * FROM users")  # 1次查询
+    for user in users:
+        orders = db.query(f"SELECT * FROM orders WHERE user_id = {user['id']}")  # N次查询！
 
-# === Fuzzing ===
+# === 测试 ===
 db = MockDB()
-payloads = ["1", "1'", "1' OR '1'='1", "1'; DROP TABLE users--", "1 UNION SELECT * FROM admin"]
-
-for p in payloads:
-    print(f"\\n=== Testing: {p} ===")
-    get_user(db, p)
+query_count = 0
+get_users_with_orders(db)
+print(f"\\nTotal queries: {query_count}")
+if query_count > 2:
+    print(f"[DEFECT] N+1 query detected! Expected <=2 queries, got {query_count}")
 ```
 
-### PHP 命令注入 Fuzzing Harness 示例
-```php
-// 注意：php -r 不需要 <?php 标签
-
-// Mock $_GET
-$_GET['cmd'] = '; id';
-$_POST['cmd'] = '; id';
-$_REQUEST['cmd'] = '; id';
-
-// 目标代码（从项目复制）
-$output = shell_exec($_GET['cmd']);
-echo "Output: " . $output;
-
-// 如果有输出，说明命令被执行
-if ($output) {
-    echo "\\n[VULN] Command executed!";
-}
-```
-
-### XSS 检测 Harness 示例 (Python)
+### 线程安全检测示例 (Python)
 ```python
-def vulnerable_render(user_input):
-    # 模拟模板渲染
-    return f"<div>Hello, {user_input}!</div>"
+import threading
 
-payloads = [
-    "test",
-    "<script>alert(1)</script>",
-    "<img src=x onerror=alert(1)>",
-    "{{7*7}}",  # SSTI
-]
+# === 目标代码（使用非线程安全集合） ===
+shared_dict = {}  # 缺陷：普通dict不是线程安全的
 
-for p in payloads:
-    output = vulnerable_render(p)
-    print(f"Input: {p}")
-    print(f"Output: {output}")
-    # 检测：payload 是否原样出现在输出中
-    if p in output and ("<" in p or "{{" in p):
-        print("[VULN] XSS - input not escaped!")
+def unsafe_update(key, value):
+    shared_dict[key] = value
+
+# === 并发测试 ===
+errors = []
+threads = []
+for i in range(100):
+    t = threading.Thread(target=unsafe_update, args=(f"key_{i}", i))
+    threads.append(t)
+
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+print(f"Expected 100 entries, got {len(shared_dict)}")
+if len(shared_dict) != 100:
+    print("[DEFECT] Thread safety issue - data loss detected!")
 ```
 
 ## 验证策略
 
-### 对于可执行的漏洞（命令注入、代码注入等）
+### 对于资源泄露类缺陷
 1. 使用 `extract_function` 或 `read_file` 获取目标代码
-2. 编写 Fuzzing Harness，mock 危险函数来检测调用
-3. 使用 `run_code` 执行 Harness
-4. 分析输出，确认漏洞是否触发
+2. 编写资源追踪 Mock，检测 open/close 是否配对
+3. 使用 `run_code` 执行测试
+4. 分析是否存在未关闭的资源
 
-### 对于数据泄露型漏洞（SQL注入、路径遍历等）
+### 对于性能类缺陷（N+1查询、循环远程调用等）
 1. 获取目标代码
-2. 编写 Harness，mock 数据库/文件系统
-3. 检查是否能构造恶意查询/路径
-4. 分析输出
+2. 编写 Mock，追踪调用次数
+3. 检查循环内是否有不必要的重复调用
+4. 分析调用次数是否合理
 
-### 对于配置类漏洞（硬编码密钥等）
-1. 使用 `read_file` 直接读取配置文件
-2. 验证敏感信息是否存在
-3. 评估影响（密钥是否有效、权限范围等）
+### 对于并发类缺陷
+1. 获取目标代码
+2. 编写并发测试，多线程同时操作
+3. 检测数据一致性和竞争条件
+4. 分析是否存在线程安全问题
+
+### 对于稳定性类缺陷（空指针、未捕获异常等）
+1. 使用 `read_file` 读取代码
+2. 分析边界条件和异常路径
+3. 编写测试用例覆盖边界场景
+4. 验证异常是否被正确处理
 
 ## 工作流程
 你将收到一批待验证的漏洞发现。对于每个发现：
@@ -257,12 +249,7 @@ Action Input: {"file_path": "search.php"}
             "is_verified": true/false,
             "verification_method": "描述验证方法",
             "verification_details": "验证过程和结果详情",
-            "poc": {
-                "description": "PoC 描述",
-                "steps": ["步骤1", "步骤2"],
-                "payload": "完整可执行的 PoC 代码或命令",
-                "harness_code": "Fuzzing Harness 代码（如果使用）"
-            },
+            "test_code": "验证测试代码（如果编写了）",
             "impact": "实际影响分析",
             "recommendation": "修复建议"
         }
@@ -277,8 +264,8 @@ Action Input: {"file_path": "search.php"}
 ```
 
 ## 验证判定标准
-- **confirmed**: 漏洞确认存在且可利用，有明确证据（如 Harness 成功触发）
-- **likely**: 高度可能存在漏洞，代码分析明确但无法动态验证
+- **confirmed**: 缺陷确认存在，有明确证据（如测试成功复现）
+- **likely**: 高度可能存在缺陷，代码分析明确但无法动态验证
 - **uncertain**: 需要更多信息才能判断
 - **false_positive**: 确认是误报，有明确理由
 
@@ -297,22 +284,22 @@ Action Input: {"file_path": "search.php"}
 
 ❌ 错误做法：
 ```
-发现: "SQL注入在 api/database.py:45"
+发现: "资源泄露在 service/FileService.java:45"
 read_file 返回: "文件不存在"
 判定: confirmed  <- 这是错误的！
 ```
 
 ✅ 正确做法：
 ```
-发现: "SQL注入在 api/database.py:45"
+发现: "资源泄露在 service/FileService.java:45"
 read_file 返回: "文件不存在"
-判定: false_positive，理由: "文件 api/database.py 不存在"
+判定: false_positive，理由: "文件 service/FileService.java 不存在"
 ```
 
 ## ⚠️ 关键约束
 1. **必须先调用工具验证** - 不允许仅凭已知信息直接判断
-2. **优先使用 run_code** - 编写 Harness 进行动态验证
-3. **PoC 必须完整可执行** - poc.payload 应该是可直接运行的代码
+2. **优先使用 run_code** - 编写测试代码进行动态验证
+3. **测试代码必须完整可执行** - 应该是可直接运行的代码
 4. **不要假设环境** - 沙箱中没有运行的服务，需要 mock
 
 ## 重要原则
@@ -321,7 +308,7 @@ read_file 返回: "文件不存在"
 3. **质量优先** - 宁可漏报也不要误报太多
 4. **证据支撑** - 每个判定都需要有依据
 
-现在开始验证漏洞发现！"""
+现在开始验证缺陷发现！"""
 
 
 @dataclass
@@ -337,10 +324,10 @@ class VerificationStep:
 
 class VerificationAgent(BaseAgent):
     """
-    漏洞验证 Agent - LLM 驱动版
+    代码验证 Agent - LLM 驱动版
     
     LLM 全程参与，自主决定：
-    1. 如何验证每个漏洞
+    1. 如何验证每个缺陷
     2. 使用什么工具
     3. 判断真假
     """
@@ -352,7 +339,7 @@ class VerificationAgent(BaseAgent):
         event_emitter=None,
     ):
         # 组合增强的系统提示词
-        full_system_prompt = f"{VERIFICATION_SYSTEM_PROMPT}\n\n{CORE_SECURITY_PRINCIPLES}\n\n{VULNERABILITY_PRIORITIES}"
+        full_system_prompt = f"{VERIFICATION_SYSTEM_PROMPT}\n\n{CORE_AUDIT_PRINCIPLES}\n\n{DEFECT_PRIORITIES}"
         
         config = AgentConfig(
             name="Verification",
@@ -528,7 +515,7 @@ class VerificationAgent(BaseAgent):
         # 🔥 如果仍然没有发现，尝试从 input_data 的其他字段提取
         if not findings_to_verify:
             # 尝试从 task 或 task_context 中提取描述的漏洞
-            if task and ("发现" in task or "漏洞" in task or "findings" in task.lower()):
+            if task and ("发现" in task or "漏洞" in task or "缺陷" in task or "findings" in task.lower()):
                 logger.warning(f"[Verification] 无法从结构化数据获取发现，任务描述: {task[:200]}")
                 # 创建一个提示 LLM 从任务描述中理解漏洞的特殊处理
                 await self.emit_event("warning", f"无法从结构化数据获取发现列表，将基于任务描述进行验证")
@@ -570,7 +557,7 @@ class VerificationAgent(BaseAgent):
         )
         
         # 🔥 记录工作开始
-        self.record_work(f"开始验证 {len(findings_to_verify)} 个漏洞发现")
+        self.record_work(f"开始验证 {len(findings_to_verify)} 个缺陷发现")
         
         # 🔥 构建包含交接上下文的初始消息
         handoff_context = self.get_handoff_context()
@@ -603,7 +590,7 @@ class VerificationAgent(BaseAgent):
 - 描述: {f.get('description', 'N/A')[:300]}
 """)
         
-        initial_message = f"""请验证以下 {len(findings_to_verify)} 个安全发现。
+        initial_message = f"""请验证以下 {len(findings_to_verify)} 个代码缺陷发现。
 
 {handoff_context if handoff_context else ''}
 
@@ -625,7 +612,7 @@ class VerificationAgent(BaseAgent):
 请开始验证。对于每个发现：
 1. 首先使用 read_file 读取发现中指定的文件（使用精确路径）
 2. 分析代码上下文
-3. 判断是否为真实漏洞
+3. 判断是否为真实缺陷
 {f"特别注意 Analysis Agent 提到的关注点。" if handoff_context else ""}"""
 
         # 初始化对话历史
@@ -637,7 +624,7 @@ class VerificationAgent(BaseAgent):
         self._steps = []
         final_result = None
         
-        await self.emit_thinking("🔐 Verification Agent 启动，LLM 开始自主验证漏洞...")
+        await self.emit_thinking("🔐 Verification Agent 启动，LLM 开始自主验证缺陷...")
         
         try:
             for iteration in range(self.config.max_iterations):
@@ -692,22 +679,22 @@ class VerificationAgent(BaseAgent):
                     # 🔥 强制检查：必须至少调用过一次工具才能完成
                     if self._tool_calls == 0:
                         logger.warning(f"[{self.name}] LLM tried to finish without any tool calls! Forcing tool usage.")
-                        await self.emit_thinking("⚠️ 拒绝过早完成：必须先使用工具验证漏洞")
+                        await self.emit_thinking("⚠️ 拒绝过早完成：必须先使用工具验证缺陷")
                         self._conversation_history.append({
                             "role": "user",
                             "content": (
-                                "⚠️ **系统拒绝**: 你必须先使用工具验证漏洞！\n\n"
+                                "⚠️ **系统拒绝**: 你必须先使用工具验证缺陷！\n\n"
                                 "不允许在没有调用任何工具的情况下直接输出 Final Answer。\n\n"
                                 "请立即使用以下工具之一进行验证：\n"
-                                "1. `read_file` - 读取漏洞所在文件的代码\n"
-                                "2. `run_code` - 编写并执行 Fuzzing Harness 验证漏洞\n"
+                                "1. `read_file` - 读取缺陷所在文件的代码\n"
+                                "2. `run_code` - 编写并执行测试代码验证缺陷\n"
                                 "3. `extract_function` - 提取目标函数进行分析\n\n"
-                                "现在请输出 Thought 和 Action，开始验证第一个漏洞。"
+                                "现在请输出 Thought 和 Action，开始验证第一个缺陷。"
                             ),
                         })
                         continue
 
-                    await self.emit_llm_decision("完成漏洞验证", "LLM 判断验证已充分")
+                    await self.emit_llm_decision("完成缺陷验证", "LLM 判断验证已充分")
                     final_result = step.final_answer
                     
                     # 🔥 记录洞察和工作
@@ -715,7 +702,7 @@ class VerificationAgent(BaseAgent):
                         verified_count = len([f for f in final_result["findings"] if f.get("is_verified")])
                         fp_count = len([f for f in final_result["findings"] if f.get("verdict") == "false_positive"])
                         self.add_insight(f"验证了 {len(final_result['findings'])} 个发现，{verified_count} 个确认，{fp_count} 个误报")
-                        self.record_work(f"完成漏洞验证: {verified_count} 个确认, {fp_count} 个误报")
+                        self.record_work(f"完成缺陷验证: {verified_count} 个确认, {fp_count} 个误报")
                     
                     await self.emit_llm_complete(
                         f"验证完成",
@@ -937,16 +924,22 @@ class VerificationAgent(BaseAgent):
     def _get_recommendation(self, vuln_type: str) -> str:
         """获取修复建议"""
         recommendations = {
-            "sql_injection": "使用参数化查询或 ORM，避免字符串拼接构造 SQL",
-            "xss": "对用户输入进行 HTML 转义，使用 CSP，避免 innerHTML",
-            "command_injection": "避免使用 shell=True，使用参数列表传递命令",
-            "path_traversal": "验证和规范化路径，使用白名单，避免直接使用用户输入",
-            "ssrf": "验证和限制目标 URL，使用白名单，禁止内网访问",
-            "deserialization": "避免反序列化不可信数据，使用 JSON 替代 pickle/yaml",
-            "hardcoded_secret": "使用环境变量或密钥管理服务存储敏感信息",
-            "weak_crypto": "使用强加密算法（AES-256, SHA-256+），避免 MD5/SHA1",
+            "null_pointer": "在使用对象前进行空值检查，使用 Optional 或空对象模式",
+            "unhandled_exception": "添加完整的异常处理逻辑，避免空catch块，确保资源在异常时正确释放",
+            "resource_leak": "使用 try-with-resources (Java) 或 with 语句 (Python)，确保资源在 finally 中关闭",
+            "infinite_recursion": "添加递归终止条件检查，限制递归深度，考虑使用迭代替代",
+            "deadlock": "避免嵌套锁，使用 tryLock 设置超时，统一锁获取顺序",
+            "oom": "限制集合大小，使用 LRU 缓存，避免在循环中创建大对象",
+            "n_plus_one_query": "使用批量查询替代循环单查，利用 JOIN 或 IN 子句",
+            "remote_call_in_loop": "合并为批量调用，使用异步并行请求",
+            "unbounded_query": "添加 LIMIT 分页参数，限制单次查询数据量",
+            "lock_granularity": "缩小锁的作用范围，使用细粒度锁或读写锁",
+            "unsafe_collection": "使用 ConcurrentHashMap 替代 HashMap，使用线程安全集合",
+            "unbounded_queue": "指定 LinkedBlockingQueue 容量，添加拒绝策略",
+            "unmanaged_thread": "使用线程池管理线程，确保 ThreadLocal 在使用后 remove",
+            "performance_issue": "分析性能瓶颈，优化热路径代码，考虑缓存和批处理",
         }
-        return recommendations.get(vuln_type, "请根据具体情况修复此安全问题")
+        return recommendations.get(vuln_type, "请根据具体情况修复此代码缺陷")
     
     def _deduplicate(self, findings: List[Dict]) -> List[Dict]:
         """去重"""
@@ -1047,7 +1040,7 @@ class VerificationAgent(BaseAgent):
             if fp:
                 files_with_confirmed[fp] = files_with_confirmed.get(fp, 0) + 1
         for fp, count in sorted(files_with_confirmed.items(), key=lambda x: x[1], reverse=True)[:10]:
-            attention_points.append(f"{fp} ({count}个确认漏洞)")
+            attention_points.append(f"{fp} ({count}个确认缺陷)")
 
         # 优先修复的区域
         priority_areas = []

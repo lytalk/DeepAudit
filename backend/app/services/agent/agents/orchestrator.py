@@ -20,24 +20,24 @@ from dataclasses import dataclass
 
 from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
 from ..json_parser import AgentJsonParser
-from ..prompts import MULTI_AGENT_RULES, CORE_SECURITY_PRINCIPLES
+from ..prompts import MULTI_AGENT_RULES, CORE_AUDIT_PRINCIPLES
 
 logger = logging.getLogger(__name__)
 
 
-ORCHESTRATOR_SYSTEM_PROMPT = """你是 DeepAudit 的编排 Agent，负责**自主**协调整个安全审计流程。
+ORCHESTRATOR_SYSTEM_PROMPT = """你是 DeepAudit 的编排 Agent，负责**自主**协调整个代码质量审查流程。
 
 ## 你的角色
-你是整个审计流程的**大脑**，不是一个机械执行者。你需要：
+你是整个审查流程的**大脑**，不是一个机械执行者。你需要：
 1. 自主思考和决策
 2. 根据观察结果动态调整策略
 3. 决定何时调用哪个子 Agent
-4. 判断何时审计完成
+4. 判断何时审查完成
 
 ## 你可以调度的子 Agent
-1. **recon**: 信息收集 Agent - 分析项目结构、技术栈、入口点
-2. **analysis**: 分析 Agent - 深度代码审计、漏洞检测
-3. **verification**: 验证 Agent - 验证发现的漏洞、生成 PoC
+1. **recon**: 信息收集 Agent - 分析项目结构、技术栈、关键模块
+2. **analysis**: 分析 Agent - 深度代码审查、运行缺陷检测
+3. **verification**: 验证 Agent - 验证发现的缺陷、编写测试验证
 
 ## 你可以使用的操作
 
@@ -80,19 +80,19 @@ Action: [dispatch_agent|summarize|finish]
 Action Input: [JSON 参数]
 ```
 
-## 审计策略建议
+## 审查策略建议
 - 先用 recon Agent 了解项目全貌（只需调度一次）
-- 根据 recon 结果，让 analysis Agent 重点审计高风险区域
-- 发现可疑漏洞后，用 verification Agent 验证
+- 根据 recon 结果，让 analysis Agent 重点审查高风险区域
+- 发现可疑缺陷后，用 verification Agent 验证
 - 随时根据新发现调整策略，不要机械执行
-- 当你认为审计足够全面时，选择 finish
+- 当你认为审查足够全面时，选择 finish
 
 ## 重要原则
 1. **你是大脑，不是执行器** - 每一步都要思考
 2. **动态调整** - 根据发现调整策略
 3. **主动决策** - 不要等待，主动推进
-4. **质量优先** - 宁可深入分析几个真实漏洞，不要浅尝辄止
-5. **避免重复** - 每个 Agent 通常只需要调度一次，如果结果不理想，尝试其他 Agent 或直接完成审计
+4. **质量优先** - 宁可深入分析几个真实缺陷，不要浅尝辄止
+5. **避免重复** - 每个 Agent 通常只需要调度一次，如果结果不理想，尝试其他 Agent 或直接完成审查
 
 ## 处理子 Agent 结果
 - 子 Agent 返回的 Observation 包含它们的分析结果
@@ -100,9 +100,9 @@ Action Input: [JSON 参数]
 - 不要反复调度同一个 Agent 期望得到不同结果
 - 如果 recon 完成后，应该调度 analysis 进行深度分析
 - 如果 analysis 完成后有发现，可以调度 verification 验证
-- 如果没有更多工作要做，使用 finish 结束审计
+- 如果没有更多工作要做，使用 finish 结束审查
 
-现在，基于项目信息开始你的审计工作！"""
+现在，基于项目信息开始你的代码质量审查工作！"""
 
 
 @dataclass
@@ -135,8 +135,8 @@ class OrchestratorAgent(BaseAgent):
         sub_agents: Optional[Dict[str, BaseAgent]] = None,
         tracer=None,
     ):
-        # 组合增强的系统提示词，注入多Agent协作规则和核心安全原则
-        full_system_prompt = f"{ORCHESTRATOR_SYSTEM_PROMPT}\n\n{CORE_SECURITY_PRINCIPLES}\n\n{MULTI_AGENT_RULES}"
+        # 组合增强的系统提示词，注入多Agent协作规则和核心审查原则
+        full_system_prompt = f"{ORCHESTRATOR_SYSTEM_PROMPT}\n\n{CORE_AUDIT_PRINCIPLES}\n\n{MULTI_AGENT_RULES}"
         
         config = AgentConfig(
             name="Orchestrator",
@@ -378,10 +378,10 @@ Action Input: {{"参数": "值"}}
                 
                 # 执行 LLM 决定的操作
                 if step.action == "finish":
-                    # 🔥 LLM 决定完成审计
-                    await self.emit_llm_decision("完成审计", "LLM 判断审计已充分完成")
+                    # 🔥 LLM 决定完成审查
+                    await self.emit_llm_decision("完成审查", "LLM 判断审查已充分完成")
                     await self.emit_llm_complete(
-                        f"编排完成，发现 {len(self._all_findings)} 个漏洞",
+                        f"编排完成，发现 {len(self._all_findings)} 个缺陷",
                         self._total_tokens
                     )
                     final_result = step.action_input
@@ -534,7 +534,7 @@ Action Input: {{"参数": "值"}}
         scope_limited = structure.get('scope_limited', False)
         scope_message = structure.get('scope_message', '')
         
-        msg = f"""请开始对以下项目进行安全审计。
+        msg = f"""请开始对以下项目进行代码质量审查。
 
 ## 项目信息
 - 名称: {project_info.get('name', 'unknown')}
@@ -545,7 +545,7 @@ Action Input: {{"参数": "值"}}
         # 🔥 根据是否限定范围显示不同的结构信息
         if scope_limited:
             msg += f"""
-## ⚠️ 审计范围限定
+## ⚠️ 审查范围限定
 **{scope_message}**
 
 ### 目标文件列表
@@ -569,20 +569,20 @@ Action Input: {{"参数": "值"}}
         if target_files:
             msg += f"""
 ## ⚠️ 重要提示
-用户指定了 **{len(target_files)}** 个目标文件进行审计。
+用户指定了 **{len(target_files)}** 个目标文件进行审查。
 请确保你的分析集中在这些指定的文件上，不要浪费时间分析其他文件。
 """
         
         msg += f"""
 ## 用户配置
-- 目标漏洞: {config.get('target_vulnerabilities', ['all'])}
-- 验证级别: {config.get('verification_level', 'sandbox')}
+- 目标缺陷类型: {config.get('target_defects', config.get('target_vulnerabilities', ['all']))}
+- 验证级别: {config.get('verification_level', 'standard')}
 - 排除模式: {config.get('exclude_patterns', [])}
 
 ## 可用子 Agent
 {', '.join(self.sub_agents.keys()) if self.sub_agents else '(暂无子 Agent)'}
 
-请开始你的审计工作。首先思考应该如何开展，然后决定第一步做什么。"""
+请开始你的代码质量审查工作。首先思考应该如何开展，然后决定第一步做什么。"""
         
         return msg
     
@@ -890,20 +890,24 @@ Action Input: {{"参数": "值"}}
                                         if line_match.isdigit():
                                             line_start = int(line_match)
 
-                            # 推断漏洞类型
+                            # 推断缺陷类型
                             area_lower = area.lower()
-                            if "command" in area_lower or "命令" in area_lower or "subprocess" in area_lower:
-                                vuln_type = "command_injection"
-                            elif "sql" in area_lower:
-                                vuln_type = "sql_injection"
-                            elif "xss" in area_lower:
-                                vuln_type = "xss"
-                            elif "path" in area_lower or "traversal" in area_lower or "路径" in area_lower:
-                                vuln_type = "path_traversal"
-                            elif "ssrf" in area_lower:
-                                vuln_type = "ssrf"
-                            elif "secret" in area_lower or "密钥" in area_lower or "key" in area_lower:
-                                vuln_type = "hardcoded_secret"
+                            if "null" in area_lower or "空指针" in area_lower or "npe" in area_lower:
+                                vuln_type = "null_pointer"
+                            elif "exception" in area_lower or "异常" in area_lower:
+                                vuln_type = "unhandled_exception"
+                            elif "resource" in area_lower or "资源" in area_lower or "close" in area_lower or "泄露" in area_lower:
+                                vuln_type = "resource_leak"
+                            elif "loop" in area_lower or "循环" in area_lower or "n+1" in area_lower:
+                                vuln_type = "n_plus_one_query"
+                            elif "thread" in area_lower or "线程" in area_lower or "concurrent" in area_lower:
+                                vuln_type = "concurrency_issue"
+                            elif "oom" in area_lower or "memory" in area_lower or "内存" in area_lower:
+                                vuln_type = "memory_issue"
+                            elif "lock" in area_lower or "锁" in area_lower or "deadlock" in area_lower:
+                                vuln_type = "lock_issue"
+                            elif "sql" in area_lower or "query" in area_lower or "查询" in area_lower:
+                                vuln_type = "performance_query"
 
                             high_risk_finding = {
                                 "title": area[:100] if len(area) > 100 else area,
@@ -1148,20 +1152,26 @@ Action Input: {{"参数": "值"}}
             if type_val and type_val.lower() not in ["vulnerability", "finding", "issue"]:
                 normalized["vulnerability_type"] = type_val
             elif "description" in normalized:
-                # 尝试从描述中推断漏洞类型
+                # 尝试从描述中推断缺陷类型
                 desc = normalized["description"].lower()
-                if "command injection" in desc or "rce" in desc or "system(" in desc:
-                    normalized["vulnerability_type"] = "command_injection"
-                elif "sql injection" in desc or "sqli" in desc:
-                    normalized["vulnerability_type"] = "sql_injection"
-                elif "xss" in desc or "cross-site scripting" in desc:
-                    normalized["vulnerability_type"] = "xss"
-                elif "path traversal" in desc or "directory traversal" in desc:
-                    normalized["vulnerability_type"] = "path_traversal"
-                elif "ssrf" in desc:
-                    normalized["vulnerability_type"] = "ssrf"
-                elif "xxe" in desc:
-                    normalized["vulnerability_type"] = "xxe"
+                if "null" in desc or "空指针" in desc or "npe" in desc or "nullpointer" in desc:
+                    normalized["vulnerability_type"] = "null_pointer"
+                elif "exception" in desc or "异常" in desc or "未捕获" in desc:
+                    normalized["vulnerability_type"] = "unhandled_exception"
+                elif "resource leak" in desc or "资源泄露" in desc or "未关闭" in desc or "close" in desc:
+                    normalized["vulnerability_type"] = "resource_leak"
+                elif "n+1" in desc or "循环查询" in desc or "loop.*query" in desc:
+                    normalized["vulnerability_type"] = "n_plus_one_query"
+                elif "oom" in desc or "内存" in desc or "memory" in desc:
+                    normalized["vulnerability_type"] = "memory_issue"
+                elif "deadlock" in desc or "死锁" in desc or "阻塞" in desc:
+                    normalized["vulnerability_type"] = "deadlock"
+                elif "thread" in desc or "线程" in desc or "concurrent" in desc:
+                    normalized["vulnerability_type"] = "concurrency_issue"
+                elif "recursion" in desc or "递归" in desc:
+                    normalized["vulnerability_type"] = "infinite_recursion"
+                elif "performance" in desc or "性能" in desc or "slow" in desc:
+                    normalized["vulnerability_type"] = "performance_issue"
                 else:
                     normalized["vulnerability_type"] = "other"
 
@@ -1212,7 +1222,7 @@ Action Input: {{"参数": "值"}}
     def _summarize_findings(self) -> str:
         """汇总当前发现"""
         if not self._all_findings:
-            return "目前还没有发现任何漏洞。"
+            return "目前还没有发现任何缺陷。"
         
         # 统计
         severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
@@ -1230,7 +1240,7 @@ Action Input: {{"参数": "值"}}
         
         summary = f"""## 当前发现汇总
 
-**总计**: {len(self._all_findings)} 个漏洞
+**总计**: {len(self._all_findings)} 个缺陷
 
 ### 严重程度分布
 - Critical: {severity_counts['critical']}
@@ -1238,7 +1248,7 @@ Action Input: {{"参数": "值"}}
 - Medium: {severity_counts['medium']}
 - Low: {severity_counts['low']}
 
-### 漏洞类型分布
+### 缺陷类型分布
 """
         for vtype, count in type_counts.items():
             summary += f"- {vtype}: {count}\n"

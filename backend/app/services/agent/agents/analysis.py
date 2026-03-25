@@ -1,11 +1,11 @@
 """
-Analysis Agent (漏洞分析层) - LLM 驱动版
+Analysis Agent (缺陷分析层) - LLM 驱动版
 
-LLM 是真正的安全分析大脑！
+LLM 是真正的代码分析大脑！
 - LLM 决定分析策略
 - LLM 选择使用什么工具
 - LLM 决定深入分析哪些代码
-- LLM 判断发现的问题是否是真实漏洞
+- LLM 判断发现的问题是否是真实缺陷
 
 类型: ReAct (真正的!)
 """
@@ -19,68 +19,52 @@ from dataclasses import dataclass
 
 from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
 from ..json_parser import AgentJsonParser
-from ..prompts import CORE_SECURITY_PRINCIPLES, VULNERABILITY_PRIORITIES
+from ..prompts import CORE_AUDIT_PRINCIPLES, DEFECT_PRIORITIES
 
 logger = logging.getLogger(__name__)
 
 
-ANALYSIS_SYSTEM_PROMPT = """你是 DeepAudit 的漏洞分析 Agent，一个**自主**的安全专家。
+ANALYSIS_SYSTEM_PROMPT = """你是 DeepAudit 的缺陷分析 Agent，一个**自主**的代码质量专家。
 
 ## 你的角色
-你是安全审计的**核心大脑**，不是工具执行器。你需要：
+你是代码质量审查的**核心大脑**，不是工具执行器。你需要：
 1. 自主制定分析策略
 2. 选择最有效的工具和方法
 3. 深入分析可疑代码
-4. 判断是否是真实漏洞
+4. 判断是否存在真实的运行缺陷
 5. 动态调整分析方向
 
 ## ⚠️ 核心原则：优先使用外部专业工具！
 
-**外部工具优先级最高！** 必须首先使用外部安全工具进行扫描，它们有：
-- 经过验证的专业规则库
+**外部工具优先级最高！** 必须首先使用外部代码分析工具进行扫描，它们有：
+- 经过自定义的运行缺陷规则库
 - 更低的误报率
-- 更全面的漏洞检测能力
+- 专业的代码缺陷检测能力
 
 ## 🔧 工具优先级（必须按此顺序使用）
 
-### 第一优先级：外部专业安全工具 ⭐⭐⭐ 【必须首先使用！】
-- **semgrep_scan**: 全语言静态分析 - **每次分析必用**
-  参数: target_path (str), rules (str: "auto" 或 "p/security-audit")
-  示例: {"target_path": ".", "rules": "auto"}
+### 第一优先级：外部专业代码分析工具 ⭐⭐⭐ 【必须首先使用！】
+- **semgrep_scan**: 全语言静态分析（自定义规则） - **每次分析必用**
+  参数: target_path (str), rules (str: "rules/" 使用本地自定义规则)
+  示例: {"target_path": ".", "rules": "rules/"}
 
-- **bandit_scan**: Python 安全扫描 - **Python项目必用**
+- **bandit_scan**: Python 代码缺陷扫描 - **Python项目必用**
   参数: target_path (str), severity (str)
   示例: {"target_path": ".", "severity": "medium"}
 
-- **gitleaks_scan**: 密钥泄露检测 - **每次分析必用**
-  参数: target_path (str)
-  示例: {"target_path": "."}
-
-- **safety_scan**: Python 依赖漏洞 - **有 requirements.txt 时必用**
-  参数: requirements_file (str)
-  示例: {"requirements_file": "requirements.txt"}
-
-- **npm_audit**: Node.js 依赖漏洞 - **有 package.json 时必用**
-  参数: target_path (str)
-  示例: {"target_path": "."}
-
-- **kunlun_scan**: 深度代码审计（Kunlun-M）
-  参数: target_path (str), language (str: "php"|"javascript")
-  示例: {"target_path": ".", "language": "php"}
-
 ### 第二优先级：智能扫描工具 ⭐⭐
-- **smart_scan**: 智能批量安全扫描
-  参数: target (str), quick_mode (bool), focus_vulnerabilities (list)
+- **smart_scan**: 智能批量代码扫描
+  参数: target (str), quick_mode (bool), focus_defects (list)
   示例: {"target": ".", "quick_mode": true}
 
-- **quick_audit**: 快速文件审计
+- **quick_audit**: 快速文件审查
   参数: file_path (str), deep_analysis (bool)
-  示例: {"file_path": "app/views.py", "deep_analysis": true}
+  示例: {"file_path": "app/service.py", "deep_analysis": true}
 
 ### 第三优先级：内置分析工具 ⭐
-- **pattern_match**: 危险模式匹配（外部工具不可用时的备选）
+- **pattern_match**: 代码模式匹配（外部工具不可用时的备选）
   参数: scan_file (str) 或 code (str), pattern_types (list)
-  示例: {"scan_file": "app/models.py", "pattern_types": ["sql_injection"]}
+  示例: {"scan_file": "app/models.py", "pattern_types": ["resource_leak"]}
 
 - **dataflow_analysis**: 数据流追踪
   参数: source_code (str), variable_name (str)
@@ -88,8 +72,6 @@ ANALYSIS_SYSTEM_PROMPT = """你是 DeepAudit 的漏洞分析 Agent，一个**自
 ### 辅助工具（RAG 优先！）
 - **rag_query**: **🔥 首选** 语义搜索代码，理解业务逻辑
   参数: query (str), top_k (int)
-- **security_search**: **🔥 首选** 安全相关搜索
-  参数: query (str)
 - **read_file**: 读取文件内容
   参数: file_path (str), start_line (int), end_line (int)
 - **list_files**: ⚠️ 仅列出目录，严禁遍历
@@ -101,30 +83,20 @@ ANALYSIS_SYSTEM_PROMPT = """你是 DeepAudit 的漏洞分析 Agent，一个**自
 根据项目技术栈，**必须首先**执行以下外部工具：
 
 ```
-# 所有项目必做
+# 所有项目必做 - 使用本地自定义运行缺陷规则
 Action: semgrep_scan
-Action Input: {"target_path": ".", "rules": "auto"}
-
-Action: gitleaks_scan
-Action Input: {"target_path": "."}
+Action Input: {"target_path": ".", "rules": "rules/"}
 
 # Python 项目必做
 Action: bandit_scan
 Action Input: {"target_path": ".", "severity": "medium"}
-
-Action: safety_scan
-Action Input: {"requirements_file": "requirements.txt"}
-
-# Node.js 项目必做
-Action: npm_audit
-Action Input: {"target_path": "."}
 ```
 
 ### 第二步：分析外部工具结果（25%时间）
 对外部工具发现的问题进行深入分析：
 - 使用 `read_file` 查看完整代码上下文
 - 使用 `dataflow_analysis` 追踪数据流
-- 验证是否为真实漏洞，排除误报
+- 验证是否为真实缺陷，排除误报
 
 ### 第三步：补充扫描（10%时间）
 如果外部工具覆盖不足，使用内置工具补充：
@@ -152,7 +124,7 @@ Action Input: [JSON 格式的参数]
 
 ```
 Thought: [总结所有发现]
-Final Answer: [JSON 格式的漏洞报告]
+Final Answer: [JSON 格式的缺陷报告]
 ```
 
 ## ⚠️ 输出格式要求（严格遵守）
@@ -178,15 +150,13 @@ Action Input: {"target_path": ".", "rules": "auto"}
 {
     "findings": [
         {
-            "vulnerability_type": "sql_injection",
+            "vulnerability_type": "resource_leak",
             "severity": "high",
-            "title": "SQL 注入漏洞",
+            "title": "IO流未关闭导致资源泄露",
             "description": "详细描述",
             "file_path": "path/to/file.py",
             "line_start": 42,
-            "code_snippet": "危险代码片段",
-            "source": "污点来源",
-            "sink": "危险函数",
+            "code_snippet": "问题代码片段",
             "suggestion": "修复建议",
             "confidence": 0.9,
             "needs_verification": true
@@ -196,18 +166,36 @@ Action Input: {"target_path": ".", "rules": "auto"}
 }
 ```
 
-## 重点关注的漏洞类型
-- SQL 注入 (query, execute, raw SQL)
-- XSS (innerHTML, document.write, v-html)
-- 命令注入 (exec, system, subprocess)
-- 路径遍历 (open, readFile, path 拼接)
-- SSRF (requests, fetch, http client)
-- 硬编码密钥 (password, secret, api_key)
-- 不安全的反序列化 (pickle, yaml.load, eval)
+## 重点关注的缺陷类型
+
+### 稳定性风险
+- 空指针异常（未判空即调用、Optional.get()未先检查）
+- 未捕获异常或异常处理不完整（空catch块、吞掉异常）
+- 资源未关闭（IO流、数据库连接、文件句柄）
+- 无限递归或深度递归风险
+- 死循环或逻辑阻塞
+- 内存溢出OOM（无限添加集合、大对象未复用）
+
+### 性能隐患
+- 循环中数据库查询（N+1问题）
+- 循环中远程服务调用
+- 大对象反复创建未复用
+- 未限制分页查询或查询数据量过大
+- 全表扫描风险（非索引字段查询）
+- 锁粒度过大
+
+### 并发问题
+- 非线程安全集合使用
+- 线程池无界队列
+
+### 资源泄露
+- 未关闭的IO流/文件句柄
+- 未关闭的JDBC连接
+- 未管理的本地线程/ThreadLocal未remove
 
 ## 重要原则
-1. **外部工具优先** - 首先使用 semgrep、bandit 等专业工具
-2. **质量优先** - 宁可深入分析几个真实漏洞，不要浅尝辄止报告大量误报
+1. **外部工具优先** - 首先使用 semgrep（本地规则）等专业工具
+2. **质量优先** - 宁可深入分析几个真实缺陷，不要浅尝辄止报告大量误报
 3. **上下文分析** - 看到可疑代码要读取上下文，理解完整逻辑
 4. **自主判断** - 不要机械相信工具输出，要用你的专业知识判断
 
@@ -215,48 +203,47 @@ Action Input: {"target_path": ".", "rules": "auto"}
 
 **知识库中的代码示例仅供概念参考，不是实际代码！**
 
-当你使用 `get_vulnerability_knowledge` 或 `query_security_knowledge` 时：
 1. **知识示例 ≠ 项目代码** - 知识库的代码示例是通用示例，不是目标项目的代码
-2. **语言可能不匹配** - 知识库可能返回 Python 示例，但项目可能是 PHP/Rust/Go
-3. **必须在实际代码中验证** - 你只能报告你在 read_file 中**实际看到**的漏洞
+2. **语言可能不匹配** - 知识库可能返回 Java 示例，但项目可能是 Python/Go
+3. **必须在实际代码中验证** - 你只能报告你在 read_file 中**实际看到**的缺陷
 4. **禁止推测** - 不要因为知识库说"这种模式常见"就假设项目中存在
 
 ❌ 错误做法（幻觉来源）：
 ```
-1. 查询 auth_bypass 知识 -> 看到 JWT 示例
-2. 没有在项目中找到 JWT 代码
-3. 仍然报告 "JWT 认证绕过漏洞"  <- 这是幻觉！
+1. 了解到 N+1 查询问题
+2. 没有在项目中找到循环内数据库调用
+3. 仍然报告 "存在N+1查询问题"  <- 这是幻觉！
 ```
 
 ✅ 正确做法：
 ```
-1. 查询 auth_bypass 知识 -> 了解认证绕过的概念
-2. 使用 read_file 读取项目的认证代码
-3. 只有**实际看到**有问题的代码才报告漏洞
+1. 了解 N+1 查询的概念和模式
+2. 使用 read_file 读取项目的数据库操作代码
+3. 只有**实际看到**循环内存在查询才报告缺陷
 4. file_path 必须是你**实际读取过**的文件
 ```
 
 ## ⚠️ 关键约束 - 必须遵守！
 1. **禁止直接输出 Final Answer** - 你必须先调用工具来分析代码
 2. **至少调用两个工具** - 使用 smart_scan/semgrep_scan 进行扫描，然后用 read_file 查看代码
-3. **没有工具调用的分析无效** - 不允许仅凭推测直接报告漏洞
+3. **没有工具调用的分析无效** - 不允许仅凭推测直接报告缺陷
 4. **先 Action 后 Final Answer** - 必须先执行工具，获取 Observation，再输出最终结论
 
 错误示例（禁止）：
 ```
-Thought: 根据项目信息，可能存在安全问题
+Thought: 根据项目信息，可能存在代码缺陷
 Final Answer: {...}  ❌ 没有调用任何工具！
 ```
 
 正确示例（必须）：
 ```
-Thought: 我需要先使用智能扫描工具对项目进行全面分析
-Action: smart_scan
-Action Input: {"scan_type": "security", "max_files": 50}
+Thought: 我需要先使用自定义规则对项目进行运行缺陷扫描
+Action: semgrep_scan
+Action Input: {"target_path": ".", "rules": "rules/"}
 ```
 然后等待 Observation，再继续深入分析或输出 Final Answer。
 
-现在开始你的安全分析！首先使用外部工具进行全面扫描。"""
+现在开始你的代码缺陷分析！首先使用外部工具进行全面扫描。"""
 
 
 @dataclass
@@ -272,7 +259,7 @@ class AnalysisStep:
 
 class AnalysisAgent(BaseAgent):
     """
-    漏洞分析 Agent - LLM 驱动版
+    缺陷分析 Agent - LLM 驱动版
     
     LLM 全程参与，自主决定：
     1. 分析什么
@@ -287,8 +274,8 @@ class AnalysisAgent(BaseAgent):
         tools: Dict[str, Any],
         event_emitter=None,
     ):
-        # 组合增强的系统提示词，注入核心安全原则和漏洞优先级
-        full_system_prompt = f"{ANALYSIS_SYSTEM_PROMPT}\n\n{CORE_SECURITY_PRINCIPLES}\n\n{VULNERABILITY_PRIORITIES}"
+        # 组合增强的系统提示词，注入核心审查原则和缺陷优先级
+        full_system_prompt = f"{ANALYSIS_SYSTEM_PROMPT}\n\n{CORE_AUDIT_PRINCIPLES}\n\n{DEFECT_PRIORITIES}"
         
         config = AgentConfig(
             name="Analysis",
@@ -422,7 +409,7 @@ class AnalysisAgent(BaseAgent):
         # 🔥 获取目标文件列表
         target_files = config.get("target_files", [])
         
-        initial_message = f"""请开始对项目进行安全漏洞分析。
+        initial_message = f"""请开始对项目进行运行缺陷分析。
 
 ## 项目信息
 - 名称: {project_info.get('name', 'unknown')}
@@ -432,7 +419,7 @@ class AnalysisAgent(BaseAgent):
 """
         # 🔥 如果指定了目标文件，明确告知 Agent
         if target_files:
-            initial_message += f"""## ⚠️ 审计范围
+            initial_message += f"""## ⚠️ 审查范围
 用户指定了 {len(target_files)} 个目标文件进行审计：
 """
             for tf in target_files[:10]:
@@ -458,7 +445,7 @@ class AnalysisAgent(BaseAgent):
 {json.dumps(initial_findings[:5], ensure_ascii=False, indent=2) if initial_findings else "无"}'''}
 
 ## 任务
-{task_context or task or '进行全面的安全漏洞分析，发现代码中的安全问题。'}
+{task_context or task or '进行全面的运行缺陷分析，发现代码中的稳定性、性能、并发和资源泄露问题。'}
 
 ## ⚠️ 分析策略要求
 1. **首先**：使用 read_file 读取上面列出的高风险文件
@@ -467,16 +454,16 @@ class AnalysisAgent(BaseAgent):
 
 **禁止**：不要跳过高风险区域直接做全局扫描
 
-## 目标漏洞类型
-{config.get('target_vulnerabilities', ['all'])}
+## 目标缺陷类型
+{config.get('target_defects', config.get('target_vulnerabilities', ['all']))}
 
 ## 可用工具
 {self.get_tools_description()}
 
-请开始你的安全分析。首先读取高风险区域的文件，然后**立即**分析其中的安全问题（输出 Action）。"""
+请开始你的缺陷分析。首先读取高风险区域的文件，然后**立即**分析其中的运行缺陷（输出 Action）。"""
         
         # 🔥 记录工作开始
-        self.record_work("开始安全漏洞分析")
+        self.record_work("开始运行缺陷分析")
 
         # 初始化对话历史
         self._conversation_history = [
@@ -488,7 +475,7 @@ class AnalysisAgent(BaseAgent):
         all_findings = []
         error_message = None  # 🔥 跟踪错误信息
         
-        await self.emit_thinking("🔬 Analysis Agent 启动，LLM 开始自主安全分析...")
+        await self.emit_thinking("🔬 Analysis Agent 启动，LLM 开始自主缺陷分析...")
         
         try:
             for iteration in range(self.config.max_iterations):
@@ -571,7 +558,7 @@ Final Answer: {{"findings": [...], "summary": "..."}}"""
                 
                 # 检查是否完成
                 if step.is_final:
-                    await self.emit_llm_decision("完成安全分析", "LLM 判断分析已充分")
+                    await self.emit_llm_decision("完成缺陷分析", "LLM 判断分析已充分")
                     logger.info(f"[{self.name}] Received Final Answer: {step.final_answer}")
                     if step.final_answer and "findings" in step.final_answer:
                         all_findings = step.final_answer["findings"]
@@ -586,16 +573,16 @@ Final Answer: {{"findings": [...], "summary": "..."}}"""
                             )
                             # 🔥 记录洞察
                             self.add_insight(
-                                f"发现 {finding.get('severity', 'medium')} 级别漏洞: {finding.get('title', 'Unknown')}"
+                                f"发现 {finding.get('severity', 'medium')} 级别缺陷: {finding.get('title', 'Unknown')}"
                             )
                     else:
                         logger.warning(f"[{self.name}] Final Answer has no 'findings' key or is None: {step.final_answer}")
                     
                     # 🔥 记录工作完成
-                    self.record_work(f"完成安全分析，发现 {len(all_findings)} 个潜在漏洞")
+                    self.record_work(f"完成缺陷分析，发现 {len(all_findings)} 个潜在缺陷")
                     
                     await self.emit_llm_complete(
-                        f"分析完成，发现 {len(all_findings)} 个潜在漏洞",
+                        f"分析完成，发现 {len(all_findings)} 个潜在缺陷",
                         self._total_tokens
                     )
                     break
@@ -676,16 +663,16 @@ Final Answer: {{"findings": [...], "summary": "..."}}"""
                     "role": "user",
                     "content": """分析阶段已结束。请立即输出 Final Answer，总结你发现的所有安全问题。
 
-即使没有发现严重漏洞，也请总结你的分析过程和观察到的潜在风险点。
+即使没有发现严重缺陷，也请总结你的分析过程和观察到的潜在风险点。
 
 请按以下 JSON 格式输出：
 ```json
 {
     "findings": [
         {
-            "vulnerability_type": "sql_injection|xss|command_injection|path_traversal|ssrf|hardcoded_secret|other",
+            "vulnerability_type": "null_pointer|unhandled_exception|resource_leak|infinite_recursion|deadlock|oom|n_plus_one_query|remote_call_in_loop|unbounded_query|lock_granularity|unsafe_collection|unbounded_queue|other",
             "severity": "critical|high|medium|low",
-            "title": "漏洞标题",
+            "title": "缺陷标题",
             "description": "详细描述",
             "file_path": "文件路径",
             "line_start": 行号,
@@ -842,10 +829,10 @@ Final Answer:""",
             key=lambda x: severity_order.get(x.get("severity", "low"), 3)
         )
 
-        # 提取关键发现（优先高危漏洞）
+        # 提取关键发现（优先高危缺陷）
         key_findings = sorted_findings[:15]
 
-        # 构建建议行动 - 哪些漏洞需要优先验证
+        # 构建建议行动 - 哪些缺陷需要优先验证
         suggested_actions = []
         for f in sorted_findings[:10]:
             suggested_actions.append({
@@ -869,17 +856,17 @@ Final Answer:""",
 
         # 构建洞察
         insights = [
-            f"发现 {len(findings)} 个潜在漏洞需要验证",
+            f"发现 {len(findings)} 个潜在缺陷需要验证",
             f"严重程度分布: Critical={severity_counts.get('critical', 0)}, "
             f"High={severity_counts.get('high', 0)}, "
             f"Medium={severity_counts.get('medium', 0)}, "
             f"Low={severity_counts.get('low', 0)}",
         ]
 
-        # 最常见的漏洞类型
+        # 最常见的缺陷类型
         if type_counts:
             top_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-            insights.append(f"主要漏洞类型: {', '.join([f'{t}({c})' for t, c in top_types])}")
+            insights.append(f"主要缺陷类型: {', '.join([f'{t}({c})' for t, c in top_types])}")
 
         # 需要关注的文件
         attention_points = []
@@ -890,9 +877,9 @@ Final Answer:""",
                 files_with_findings[fp] = files_with_findings.get(fp, 0) + 1
 
         for fp, count in sorted(files_with_findings.items(), key=lambda x: x[1], reverse=True)[:10]:
-            attention_points.append(f"{fp} ({count}个漏洞)")
+            attention_points.append(f"{fp} ({count}个缺陷)")
 
-        # 优先验证的区域 - 高危漏洞所在文件
+        # 优先验证的区域 - 高危缺陷所在文件
         priority_areas = []
         for f in sorted_findings[:10]:
             if f.get("severity") in ["critical", "high"]:
@@ -909,7 +896,7 @@ Final Answer:""",
 
         # 构建摘要
         high_count = severity_counts.get("critical", 0) + severity_counts.get("high", 0)
-        summary = f"完成代码分析: 发现{len(findings)}个漏洞, 其中{high_count}个高危"
+        summary = f"完成代码分析: 发现{len(findings)}个缺陷, 其中{high_count}个高危"
 
         return self.create_handoff(
             to_agent="verification",

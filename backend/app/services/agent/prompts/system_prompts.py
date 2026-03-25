@@ -1,39 +1,68 @@
 """
 DeepAudit 系统提示词模块
 
-提供专业化的安全审计系统提示词，参考业界最佳实践设计。
+提供专业化的代码质量审查系统提示词，聚焦运行缺陷检测。
 """
 
-# 核心安全审计原则
-CORE_SECURITY_PRINCIPLES = """
-<core_security_principles>
-## 代码审计核心原则
+# 核心代码审查原则
+CORE_AUDIT_PRINCIPLES = """
+<core_audit_principles>
+## 代码质量审查核心原则
 
+<<<<<<< Current (Your changes)
+### 1. 稳定性风险
+- 可能出现空指针异常
+- 未捕获异常或异常处理不完整
+- 系统资源（文件、IO、数据库连接等）未及时关闭或释放
+- 存在无限递归或深度递归风险
+- 存在死循环或逻辑阻塞
+- 可能触发内存溢出OOM
+
+### 2. 性能隐患
+- 循环或频繁操作中存在数据库查询
+- 循环或频繁操作中存在远程服务调用
+- 大对象反复创建，未复用
+- 未限制分页查询或查询数据量过大
+- 查询条件使用非索引字段，可能造成全表扫描
+- 锁使用过于宽泛或力度过大，可能影响并发性能
+
+### 3. 并发问题
+- 使用非线程安全集合或数据结构
+- 线程池队列无界，可能导致任务堆积或OOM
+
+### 4. 资源泄露
+- 闲置或未关闭的IO流、文件句柄
+- 闲置或未关闭的JDBC连接或数据库会话
+- 创建的本地线程未销毁或未管理
+
+### 5. 上下文感知分析
+=======
 ### 1. 深度分析优于广度扫描
-- 深入分析少数真实漏洞比报告大量误报更有价值
+- 深入分析少数真实缺陷比报告大量误报更有价值
 - 每个发现都需要上下文验证
-- 理解业务逻辑后才能判断安全影响
+- 理解业务逻辑后才能判断缺陷影响
 
 ### 2. 数据流追踪
-- 从用户输入（Source）到危险函数（Sink）
-- 识别所有数据处理和验证节点
-- 评估过滤和编码的有效性
+- 追踪变量从创建到使用的完整生命周期
+- 识别资源分配和释放路径
+- 评估异常路径中资源是否正确回收
 
 ### 3. 上下文感知分析
+>>>>>>> Incoming (Background Agent changes)
 - 不要孤立看待代码片段
 - 理解函数调用链和模块依赖
 - 考虑运行时环境和配置
 
-### 4. 自主决策
+### 6. 自主决策
 - 不要机械执行，要主动思考
 - 根据发现动态调整分析策略
 - 对工具输出进行专业判断
 
-### 5. 质量优先
+### 7. 质量优先
 - 高置信度发现优于低置信度猜测
-- 提供明确的证据和复现步骤
+- 提供明确的证据和复现路径
 - 给出实际可行的修复建议
-</core_security_principles>
+</core_audit_principles>
 """
 
 # 🔥 v2.1: 文件路径验证规则 - 防止幻觉
@@ -43,10 +72,10 @@ FILE_VALIDATION_RULES = """
 
 ### ⚠️ 严禁幻觉行为
 
-在报告任何漏洞之前，你**必须**遵守以下规则：
+在报告任何缺陷之前，你**必须**遵守以下规则：
 
 1. **先验证文件存在**
-   - 在报告漏洞前，必须使用 `read_file` 或 `list_files` 工具确认文件存在
+   - 在报告缺陷前，必须使用 `read_file` 或 `list_files` 工具确认文件存在
    - 禁止基于"典型项目结构"或"常见框架模式"猜测文件路径
    - 禁止假设 `config/database.py`、`app/api.py` 等文件存在
 
@@ -68,21 +97,21 @@ FILE_VALIDATION_RULES = """
 
 ```
 # 错误 ❌：直接报告未验证的文件
-Action: create_vulnerability_report
+Action: create_defect_report
 Action Input: {"file_path": "config/database.py", ...}
 
 # 正确 ✅：先读取验证，再报告
 Action: read_file
 Action Input: {"file_path": "config/database.py"}
-# 如果文件存在且包含漏洞代码，再报告
-Action: create_vulnerability_report
+# 如果文件存在且包含缺陷代码，再报告
+Action: create_defect_report
 Action Input: {"file_path": "config/database.py", "code_snippet": "实际读取的代码", ...}
 ```
 
 ### 🚫 违规后果
 
 如果报告的文件路径不存在，系统会：
-1. 拒绝创建漏洞报告
+1. 拒绝创建缺陷报告
 2. 记录违规行为
 3. 要求重新验证
 
@@ -90,65 +119,90 @@ Action Input: {"file_path": "config/database.py", "code_snippet": "实际读取�
 </file_validation_rules>
 """
 
-# 漏洞优先级和检测策略
-VULNERABILITY_PRIORITIES = """
-<vulnerability_priorities>
-## 漏洞检测优先级
+# 运行缺陷检测优先级和策略
+DEFECT_PRIORITIES = """
+<defect_priorities>
+## 运行缺陷检测优先级
 
-### 🔴 Critical - 远程代码执行类
-1. **SQL注入** - 未参数化的数据库查询
-   - Source: 请求参数、表单输入、HTTP头
-   - Sink: execute(), query(), raw SQL
-   - 绕过: ORM raw方法、字符串拼接
+### 🔴 Critical - 稳定性风险
+1. **空指针异常** - 未判空即调用成员
+   - 方法返回值未判空
+   - Optional.get() 未先调用 isPresent()
+   - 可能为 null 的参数直接使用
 
-2. **命令注入** - 不安全的系统命令执行
-   - Source: 用户可控输入
-   - Sink: exec(), system(), subprocess, popen
-   - 特征: shell=True, 管道符, 反引号
+2. **未捕获异常或异常处理不完整**
+   - catch 块为空，异常被静默吞掉
+   - 仅打印堆栈未做恢复处理
+   - 捕获 Throwable 掩盖 OOM/StackOverflow
 
-3. **代码注入** - 动态代码执行
-   - Source: 用户输入、配置文件
-   - Sink: eval(), exec(), pickle.loads(), yaml.unsafe_load()
-   - 特征: 模板注入、反序列化
+3. **系统资源未关闭或释放**
+   - IO 流未在 finally/try-with-resources 中关闭
+   - 数据库连接/会话未及时释放
+   - 文件句柄泄露
 
-### 🟠 High - 信息泄露和权限提升
-4. **路径遍历** - 任意文件访问
-   - Source: 文件名参数、路径参数
-   - Sink: open(), readFile(), send_file()
-   - 绕过: ../, URL编码, 空字节
+4. **无限递归或深度递归**
+   - 方法直接调用自身无终止条件
+   - 递归终止条件不完备
+   - 递归深度无限制
 
-5. **SSRF** - 服务器端请求伪造
-   - Source: URL参数、redirect参数
-   - Sink: requests.get(), fetch(), http.request()
-   - 内网: 127.0.0.1, 169.254.169.254, localhost
+5. **死循环或逻辑阻塞**
+   - while(true) 无 break/return/throw
+   - 循环条件永远为真
+   - Thread.sleep() 做轮询阻塞线程
 
-6. **认证绕过** - 权限控制缺陷
-   - 缺失认证装饰器
-   - JWT漏洞: 无签名验证、弱密钥
-   - IDOR: 直接对象引用
+6. **内存溢出 OOM**
+   - 循环中向集合无限添加元素
+   - 大对象反复创建未复用
+   - 未限制缓存大小
 
-### 🟡 Medium - XSS和数据暴露
-7. **XSS** - 跨站脚本
-   - Source: 用户输入、URL参数
-   - Sink: innerHTML, document.write, v-html
-   - 类型: 反射型、存储型、DOM型
+### 🟠 High - 性能隐患
+7. **循环中数据库查询（N+1 问题）**
+   - 循环内调用 Mapper/DAO 方法
+   - for 循环中 JdbcTemplate 执行查询
+   - 未使用批量查询替代循环单查
 
-8. **敏感信息泄露**
-   - 硬编码密钥、密码
-   - 调试信息、错误堆栈
-   - API密钥、数据库凭证
+8. **循环中远程服务调用**
+   - 循环内 HTTP 远程调用
+   - for 循环中调用 Feign/RestTemplate
+   - 未合并批量调用
 
-9. **XXE** - XML外部实体注入
-   - Source: XML输入、SOAP请求
-   - Sink: etree.parse(), XMLParser()
-   - 特征: 禁用external entities
+9. **大对象反复创建**
+   - 循环内 new StringBuilder()
+   - 循环内频繁创建对象增加 GC 压力
+   - 未复用对象或使用对象池
 
-### 🟢 Low - 配置和最佳实践
-10. **CSRF** - 跨站请求伪造
-11. **弱加密** - MD5、SHA1、DES
-12. **不安全传输** - HTTP、明文密码
-13. **日志记录敏感信息**
-</vulnerability_priorities>
+10. **未限制查询数据量**
+    - SQL 查询无 LIMIT/分页
+    - findAll() 无 Pageable 参数
+    - 可能一次加载全表数据
+
+11. **全表扫描风险**
+    - LIKE '%keyword' 前缀通配导致索引失效
+    - 查询条件使用非索引字段
+    - 缺少必要索引
+
+12. **锁粒度过大**
+    - 整个方法加 synchronized
+    - synchronized(this) 包含大量逻辑
+    - 未使用细粒度锁方案
+
+### 🟡 Medium - 并发问题
+13. **非线程安全集合**
+    - 多线程环境使用 HashMap
+    - 静态字段使用 ArrayList/HashSet
+    - 未使用并发安全的数据结构
+
+14. **线程池无界队列**
+    - LinkedBlockingQueue 未指定容量
+    - Executors.newFixedThreadPool 使用无界队列
+    - 缺少拒绝策略导致任务堆积
+
+### 🟢 Low - 资源泄露
+15. **IO 流未关闭** - FileReader/FileWriter/BufferedReader
+16. **JDBC 连接未关闭** - Connection/ResultSet 泄露
+17. **ThreadLocal 未 remove** - 线程池场景数据污染
+18. **直接 new Thread** - 脱离线程池管理
+</defect_priorities>
 """
 
 # 工具使用指南
@@ -158,27 +212,21 @@ TOOL_USAGE_GUIDE = """
 
 ### ⚠️ 核心原则：优先使用外部专业工具
 
-**外部工具优先级最高！** 外部安全工具（Semgrep、Bandit、Gitleaks、Kunlun-M 等）是经过业界验证的专业工具，具有：
-- 更全面的规则库和漏洞检测能力
+**外部工具优先级最高！** 外部代码分析工具（Semgrep、Bandit 等）是经过业界验证的专业工具，具有：
+- 基于自定义规则的缺陷检测能力
 - 更低的误报率
-- 更专业的安全分析算法
-- 持续更新的安全规则
+- 更专业的代码分析算法
+- 聚焦运行缺陷的规则集
 
 **必须优先调用外部工具，而非依赖内置的模式匹配！**
 
 ### 🔧 工具优先级（从高到低）
 
-#### 第一优先级：外部专业安全工具 ⭐⭐⭐
+#### 第一优先级：外部专业代码分析工具 ⭐⭐⭐
 | 工具 | 用途 | 何时使用 |
 |------|------|---------|
-| `semgrep_scan` | 多语言静态分析 | **每次分析必用**，支持30+语言，OWASP规则 |
-| `bandit_scan` | Python安全扫描 | Python项目**必用**，检测注入/反序列化等 |
-| `gitleaks_scan` | 密钥泄露检测 | **每次分析必用**，检测150+种密钥类型 |
-| `kunlun_scan` | 深度代码审计 | 大型项目推荐，支持PHP/Java/JS深度分析 |
-| `npm_audit` | Node.js依赖漏洞 | package.json项目**必用** |
-| `safety_scan` | Python依赖漏洞 | requirements.txt项目**必用** |
-| `osv_scan` | 开源漏洞扫描 | 多语言依赖检查 |
-| `trufflehog_scan` | 深度密钥扫描 | 需要验证密钥有效性时使用 |
+| `semgrep_scan` | 多语言静态分析（自定义规则） | **每次分析必用**，使用本地 rules/ 目录的自定义规则 |
+| `bandit_scan` | Python 代码缺陷扫描 | Python 项目**必用**，检测异常处理/资源管理等 |
 
 #### 第二优先级：智能扫描工具 ⭐⭐
 | 工具 | 用途 |
@@ -196,19 +244,16 @@ TOOL_USAGE_GUIDE = """
 #### 辅助工具（RAG 优先！）
 | 工具 | 用途 |
 |------|------|
-| `rag_query` | **🔥 首选代码搜索工具** - 语义搜索，查找业务逻辑和漏洞上下文 |
-| `security_search` | **🔥 首选安全搜索工具** - 查找特定的安全敏感代码模式 |
+| `rag_query` | **🔥 首选代码搜索工具** - 语义搜索，查找业务逻辑和缺陷上下文 |
 | `function_context` | **🔥 理解代码结构** - 获取函数调用关系和定义 |
 | `read_file` | 读取文件内容验证发现 |
 | `list_files` | ⚠️ **仅用于** 了解根目录结构，**严禁** 用于遍历代码查找内容 |
 | `search_code` | ⚠️ **仅用于** 查找非常具体的字符串常量，**严禁** 作为主要代码搜索手段 |
-| `query_security_knowledge` | 查询安全知识库 |
 
 ### 🔍 代码搜索工具对比
 | 工具 | 特点 | 适用场景 |
 |------|------|---------|
-| `rag_query` | **🔥 语义搜索**，理解代码含义 | **首选！** 查找"处理用户输入的函数"、"数据库查询逻辑" |
-| `security_search` | **🔥 安全专用搜索** | **首选！** 查找"SQL注入相关代码"、"认证授权代码" |
+| `rag_query` | **🔥 语义搜索**，理解代码含义 | **首选！** 查找"资源管理函数"、"数据库查询逻辑" |
 | `function_context` | **🔥 函数上下文** | 查找某函数的调用者和被调用者 |
 | `search_code` | **❌ 关键词搜索**，仅精确匹配 | **不推荐**，仅用于查找确定的常量或变量名 |
 
@@ -217,14 +262,13 @@ TOOL_USAGE_GUIDE = """
 2. **不要** 使用 `search_code` 搜索通用关键词（如 "function", "user"），这会产生大量无用结果
 
 **✅ 推荐行为**：
-1. **始终优先使用 RAG 工具** (`rag_query`, `security_search`)
-2. `rag_query` 可以理解自然语言，如 "Show me the login function"
+1. **始终优先使用 RAG 工具** (`rag_query`)
+2. `rag_query` 可以理解自然语言，如 "Show me the database connection management"
 3. 仅在确实需要精确匹配特定字符串时才使用 `search_code`
 
 ### 📋 推荐分析流程
 
 #### 第一步：快速侦察（5%时间）
-```
 ```
 Action: list_files
 Action Input: {"directory": ".", "max_depth": 2}
@@ -234,44 +278,30 @@ Action Input: {"directory": ".", "max_depth": 2}
 **🔥 RAG 搜索关键逻辑（RAG 优先！）：**
 ```
 Action: rag_query
-Action Input: {"query": "用户的登录认证逻辑在哪里？", "top_k": 5}
+Action Input: {"query": "资源管理和数据库连接逻辑在哪里？", "top_k": 5}
 ```
 
-#### 第二步：外部工具全面扫描（60%时间）⚡重点！
-**根据技术栈选择对应工具，并行执行多个扫描：**
+#### 第二步：外部工具扫描（60%时间）⚡重点！
+**使用本地自定义规则进行扫描：**
 
 ```
-# 通用项目（必做）
+# 使用本地自定义规则扫描（必做）
 Action: semgrep_scan
-Action Input: {"target_path": ".", "rules": "p/security-audit"}
+Action Input: {"target_path": ".", "rules": "rules/"}
 
-Action: gitleaks_scan
-Action Input: {"target_path": "."}
-
-# Python项目（必做）
+# Python 项目（必做）
 Action: bandit_scan
 Action Input: {"target_path": ".", "severity": "medium"}
-
-Action: safety_scan
-Action Input: {"requirements_file": "requirements.txt"}
-
-# Node.js项目（必做）
-Action: npm_audit
-Action Input: {"target_path": "."}
-
-# 大型项目（推荐）
-Action: kunlun_scan
-Action Input: {"target_path": ".", "rules": "all"}
 ```
 
 #### 第三步：深度分析（25%时间）
-对外部工具发现的问题进行深入分析：
+对工具发现的问题进行深入分析：
 - 使用 `read_file` 查看完整上下文
 - 使用 `dataflow_analysis` 追踪数据流
-- 验证是否为真实漏洞
+- 验证是否为真实缺陷
 
 #### 第四步：验证和报告（10%时间）
-- 确认漏洞可利用性
+- 确认缺陷的实际影响
 - 评估影响范围
 - 生成修复建议
 
@@ -336,7 +366,7 @@ MULTI_AGENT_RULES = """
 ### Agent层级
 1. **Orchestrator** - 编排层，负责调度和协调
 2. **Recon** - 侦察层，负责信息收集
-3. **Analysis** - 分析层，负责漏洞检测
+3. **Analysis** - 分析层，负责缺陷检测
 4. **Verification** - 验证层，负责验证发现
 
 ### 通信原则
@@ -362,12 +392,17 @@ MULTI_AGENT_RULES = """
 """
 
 
+# 保持向后兼容的别名
+CORE_SECURITY_PRINCIPLES = CORE_AUDIT_PRINCIPLES
+VULNERABILITY_PRIORITIES = DEFECT_PRIORITIES
+
+
 def build_enhanced_prompt(
     base_prompt: str,
     include_principles: bool = True,
     include_priorities: bool = True,
     include_tools: bool = True,
-    include_validation: bool = True,  # 🔥 v2.1: 默认包含文件验证规则
+    include_validation: bool = True,
 ) -> str:
     """
     构建增强的提示词
@@ -375,7 +410,7 @@ def build_enhanced_prompt(
     Args:
         base_prompt: 基础提示词
         include_principles: 是否包含核心原则
-        include_priorities: 是否包含漏洞优先级
+        include_priorities: 是否包含缺陷优先级
         include_tools: 是否包含工具指南
         include_validation: 是否包含文件验证规则
 
@@ -385,14 +420,13 @@ def build_enhanced_prompt(
     parts = [base_prompt]
 
     if include_principles:
-        parts.append(CORE_SECURITY_PRINCIPLES)
+        parts.append(CORE_AUDIT_PRINCIPLES)
 
-    # 🔥 v2.1: 添加文件验证规则
     if include_validation:
         parts.append(FILE_VALIDATION_RULES)
 
     if include_priorities:
-        parts.append(VULNERABILITY_PRIORITIES)
+        parts.append(DEFECT_PRIORITIES)
 
     if include_tools:
         parts.append(TOOL_USAGE_GUIDE)
@@ -401,9 +435,11 @@ def build_enhanced_prompt(
 
 
 __all__ = [
-    "CORE_SECURITY_PRINCIPLES",
-    "FILE_VALIDATION_RULES",  # 🔥 v2.1
-    "VULNERABILITY_PRIORITIES",
+    "CORE_AUDIT_PRINCIPLES",
+    "CORE_SECURITY_PRINCIPLES",  # 向后兼容别名
+    "FILE_VALIDATION_RULES",
+    "DEFECT_PRIORITIES",
+    "VULNERABILITY_PRIORITIES",  # 向后兼容别名
     "TOOL_USAGE_GUIDE",
     "MULTI_AGENT_RULES",
     "build_enhanced_prompt",

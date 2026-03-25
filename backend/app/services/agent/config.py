@@ -456,14 +456,14 @@ def get_agent_type_config(agent_type: str) -> AgentTypeConfig:
                 "smart_scan", "pattern_match", "dataflow_analysis",
                 "read_file", "search_code", "semgrep_scan", "bandit_scan"
             ],
-            knowledge_modules=["sql_injection", "xss", "command_injection"],
+            knowledge_modules=["stability", "performance", "concurrency"],
         ),
         "verification": AgentTypeConfig(
             agent_type="verification",
             max_iterations=config.verification_max_iterations,
             timeout_seconds=config.sub_agent_timeout_seconds,
-            tools=["validate_vulnerability", "dataflow_analysis", "sandbox_execute"],
-            knowledge_modules=["vulnerability_verification"],
+            tools=["validate_defect", "dataflow_analysis", "sandbox_execute"],
+            knowledge_modules=["defect_verification"],
         ),
     }
 
