@@ -9,7 +9,6 @@ CORE_AUDIT_PRINCIPLES = """
 <core_audit_principles>
 ## 代码质量审查核心原则
 
-<<<<<<< Current (Your changes)
 ### 1. 稳定性风险
 - 可能出现空指针异常
 - 未捕获异常或异常处理不完整
@@ -48,7 +47,6 @@ CORE_AUDIT_PRINCIPLES = """
 - 评估异常路径中资源是否正确回收
 
 ### 3. 上下文感知分析
->>>>>>> Incoming (Background Agent changes)
 - 不要孤立看待代码片段
 - 理解函数调用链和模块依赖
 - 考虑运行时环境和配置
