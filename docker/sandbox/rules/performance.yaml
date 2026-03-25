@@ -1,0 +1,196 @@
+rules:
+
+  # ─── 1. 循环内数据库查询 ──────────────────────────────────────────────
+  - id: db-query-in-loop-mybatis
+    languages: [java]
+    severity: ERROR
+    message: |
+      [性能] 在循环内调用 Mapper/DAO 方法，导致 N+1 查询问题，严重影响性能。
+      建议：将 ID 列表收集后，使用批量查询（IN 语句）替代循环单条查询。
+    patterns:
+      - pattern: |
+          for (...) {
+            ...
+            $MAPPER.$METHOD(...);
+            ...
+          }
+      - pattern: |
+          while (...) {
+            ...
+            $MAPPER.$METHOD(...);
+            ...
+          }
+    metadata:
+      category: performance
+      subcategory: n-plus-one
+
+  - id: db-query-in-loop-jdbctemplate
+    languages: [java]
+    severity: ERROR
+    message: |
+      [性能] 在循环内使用 JdbcTemplate 执行查询，产生 N+1 问题。
+      建议：改用批量查询。
+    patterns:
+      - pattern: |
+          for (...) {
+            ...
+            $JDBC.query(...);
+            ...
+          }
+      - pattern: |
+          for (...) {
+            ...
+            $JDBC.queryForObject(...);
+            ...
+          }
+      - pattern: |
+          for (...) {
+            ...
+            $JDBC.update(...);
+            ...
+          }
+    metadata:
+      category: performance
+      subcategory: n-plus-one
+
+  # ─── 2. 循环内远程服务调用 ────────────────────────────────────────────
+  - id: http-call-in-loop
+    languages: [java]
+    severity: ERROR
+    message: |
+      [性能] 在循环内进行 HTTP 远程调用，累计耗时极高，且放大下游压力。
+      建议：收集批量参数后，单次批量调用远程接口。
+    patterns:
+      - pattern: |
+          for (...) {
+            ...
+            $CLIENT.execute(...);
+            ...
+          }
+      - pattern: |
+          for (...) {
+            ...
+            $REST.getForObject(...);
+            ...
+          }
+      - pattern: |
+          for (...) {
+            ...
+            $REST.postForObject(...);
+            ...
+          }
+      - pattern: |
+          for (...) {
+            ...
+            $FEIGN.$METHOD(...);
+            ...
+          }
+    metadata:
+      category: performance
+      subcategory: remote-call-in-loop
+
+  # ─── 3. 大对象反复创建 ────────────────────────────────────────────────
+  - id: stringbuilder-in-loop
+    languages: [java]
+    severity: WARNING
+    message: |
+      [性能] 在循环内反复 new StringBuilder()，每次都创建新对象，增加 GC 压力。
+      建议：在循环外创建 StringBuilder，循环内调用 setLength(0) 复用。
+    pattern: |
+      for (...) {
+        ...
+        new StringBuilder();
+        ...
+      }
+    metadata:
+      category: performance
+      subcategory: object-reuse
+
+  - id: new-object-in-loop
+    languages: [java]
+    severity: INFO
+    message: |
+      [性能] 在循环内反复创建对象（new $TYPE(...)），可能造成频繁 GC。
+      建议：评估是否可在循环外复用或使用对象池。
+    pattern: |
+      for (...) {
+        ...
+        new $TYPE(...);
+        ...
+      }
+    metadata:
+      category: performance
+      subcategory: object-reuse
+
+  # ─── 4. 未限制分页/查询数据量 ─────────────────────────────────────────
+  - id: select-without-limit
+    languages: [java]
+    severity: WARNING
+    message: |
+      [性能] SQL 查询语句未包含 LIMIT / pageSize 限制，可能一次性加载全表数据。
+      建议：所有列表类查询必须添加分页参数，或限制最大返回行数。
+    patterns:
+      - pattern: |
+          $OBJ.$METHOD("SELECT ... FROM ...");
+      - pattern-not: |
+          $OBJ.$METHOD("... LIMIT ...");
+    metadata:
+      category: performance
+      subcategory: unbounded-query
+
+  - id: findall-no-pageable
+    languages: [java]
+    severity: WARNING
+    message: |
+      [性能] 调用 findAll() 未传入 Pageable 参数，可能返回全表数据导致 OOM。
+      建议：使用 findAll(Pageable pageable) 分页版本。
+    pattern: $REPO.findAll()
+    metadata:
+      category: performance
+      subcategory: unbounded-query
+
+  # ─── 5. 非索引字段查询（like 前缀通配）────────────────────────────────
+  - id: like-leading-wildcard
+    languages: [java]
+    severity: WARNING
+    message: |
+      [性能] SQL 使用前缀 % 的 LIKE 查询（如 LIKE '%keyword'），将导致全表扫描，索引失效。
+      建议：改为后缀通配（LIKE 'keyword%'），或使用全文索引。
+    pattern: $OBJ.$METHOD("... LIKE '%$VAL%' ...")
+    metadata:
+      category: performance
+      subcategory: full-table-scan
+
+  # ─── 6. 锁粒度过大 ────────────────────────────────────────────────────
+  - id: synchronized-method
+    languages: [java]
+    severity: WARNING
+    message: |
+      [性能] 整个方法加了 synchronized 锁，锁粒度过大，高并发下会成为性能瓶颈。
+      建议：缩小同步块范围，或使用 ReentrantLock / ConcurrentHashMap 等细粒度方案。
+    pattern: |
+      synchronized $RETTYPE $METHOD(...) {
+        ...
+      }
+    metadata:
+      category: performance
+      subcategory: lock-granularity
+
+  - id: synchronized-on-this-large-block
+    languages: [java]
+    severity: INFO
+    message: |
+      [性能] synchronized(this) 同步块包含大量逻辑，锁范围疑似过宽。
+      建议：拆分同步块，仅对真正需要互斥的最小代码段加锁。
+    pattern: |
+      synchronized (this) {
+        ...
+        $A;
+        $B;
+        $C;
+        $D;
+        ...
+      }
+    metadata:
+      category: performance
+      subcategory: lock-granularity

@@ -36,7 +36,7 @@ services:
       - deepaudit-network
 
   backend:
-    image: ghcr.io/lintsinghua/deepaudit-backend:latest
+    image: ghcr.io/lytalk/deepaudit-backend:self
     restart: unless-stopped
     volumes:
       - backend_uploads:/app/uploads
@@ -48,7 +48,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - AGENT_ENABLED=true
       - SANDBOX_ENABLED=true
-      - SANDBOX_IMAGE=ghcr.io/lintsinghua/deepaudit-sandbox:latest
+      - SANDBOX_IMAGE=ghcr.io/lytalk/deepaudit-sandbox:self
       # LLM 配置 - 请根据需要修改
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o}
@@ -75,7 +75,7 @@ services:
 
   # 数据库迁移服务 - 在后端启动前自动执行
   db-migrate:
-    image: ghcr.io/lintsinghua/deepaudit-backend:latest
+    image: ghcr.io/lytalk/deepaudit-backend:self
     restart: "no"
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/deepaudit
@@ -87,7 +87,7 @@ services:
       - deepaudit-network
 
   frontend:
-    image: ghcr.io/lintsinghua/deepaudit-frontend:latest
+    image: ghcr.io/lytalk/deepaudit-frontend:self
     restart: unless-stopped
     ports:
       - "3000:80"
@@ -105,7 +105,7 @@ services:
 
   # 预拉取沙箱镜像（后端会按需调用）
   sandbox-pull:
-    image: ghcr.io/lintsinghua/deepaudit-sandbox:latest
+    image: ghcr.io/lytalk/deepaudit-sandbox:self
     restart: "no"
     command: echo "Sandbox image ready"
 

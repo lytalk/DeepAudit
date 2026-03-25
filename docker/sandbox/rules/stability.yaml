@@ -1,0 +1,192 @@
+rules:
+
+  # ─── 1. 可能出现空指针异常 ───────────────────────────────────────────
+  - id: null-return-dereference
+    languages: [java]
+    severity: ERROR
+    message: |
+      [稳定性] 方法返回值未判空即调用其成员，可能触发 NullPointerException。
+      建议：先对返回值进行 null 检查，或使用 Optional。
+    patterns:
+      - pattern-either:
+          # 读取字段用于赋值/初始化（合法 Java 语句）
+          - pattern: |
+              $RET = $METHOD(...);
+              $X = $RET.$FIELD;
+          # 返回字段（合法 Java 语句）
+          - pattern: |
+              $RET = $METHOD(...);
+              return $RET.$FIELD;
+          # 链式调用（例如 ret.field.toString() / ret.field.size()）
+          - pattern: |
+              $RET = $METHOD(...);
+              $RET.$FIELD.$CALL(...);
+      - pattern-not: |
+          $RET = $METHOD(...);
+          if ($RET != null) { ... }
+    metadata:
+      category: stability
+      subcategory: null-pointer
+
+  - id: optional-get-without-check
+    languages: [java]
+    severity: WARNING
+    message: |
+      [稳定性] 直接调用 Optional.get() 而未先调用 isPresent()，可能抛出 NoSuchElementException。
+      建议：使用 orElse / orElseThrow / ifPresent 替代。
+    patterns:
+      - pattern: $OPT.get()
+      - pattern-not-inside: |
+          if ($OPT.isPresent()) { ... }
+    metadata:
+      category: stability
+      subcategory: null-pointer
+
+  # ─── 2. 未捕获异常或异常处理不完整 ────────────────────────────────────
+  - id: empty-catch-block
+    languages: [java]
+    severity: WARNING
+    message: |
+      [稳定性] catch 块为空，异常被静默吞掉，问题将被掩盖。
+      建议：至少记录日志，或重新抛出。
+    pattern: |
+      try { ... } catch ($E $EX) {}
+    metadata:
+      category: stability
+      subcategory: exception-handling
+
+  - id: catch-exception-swallow-log-only
+    languages: [java]
+    severity: INFO
+    message: |
+      [稳定性] catch 块仅打印堆栈，未做任何恢复或上报处理。
+      建议：确认此处异常是否需要业务层处理或告警。
+    pattern: |
+      try { ... } catch ($E $EX) { $EX.printStackTrace(); }
+    metadata:
+      category: stability
+      subcategory: exception-handling
+
+  - id: catch-throwable
+    languages: [java]
+    severity: WARNING
+    message: |
+      [稳定性] 捕获了 Throwable（包含 Error），可能掩盖 OOM/StackOverflow 等严重错误。
+      建议：仅捕获 Exception，让 Error 向上传播。
+    pattern: |
+      catch (Throwable $E) { ... }
+    metadata:
+      category: stability
+      subcategory: exception-handling
+
+  # ─── 3. 系统资源未关闭 ────────────────────────────────────────────────
+  - id: inputstream-not-closed
+    languages: [java]
+    severity: ERROR
+    message: |
+      [稳定性/资源泄露] InputStream 未在 finally 块或 try-with-resources 中关闭。
+      建议：使用 try-with-resources 语法。
+    patterns:
+      - pattern: |
+          $STREAM = new $TYPE(...);
+          ...
+          $STREAM.read(...);
+      - pattern-not: |
+          try ($TYPE $STREAM = ...) { ... }
+      - pattern-not: |
+          try { ... } finally { $STREAM.close(); }
+    metadata:
+      category: stability
+      subcategory: resource-leak
+
+  - id: outputstream-not-closed
+    languages: [java]
+    severity: ERROR
+    message: |
+      [稳定性/资源泄露] OutputStream 未在 finally 块或 try-with-resources 中关闭。
+      建议：使用 try-with-resources 语法。
+    patterns:
+      - pattern: |
+          $STREAM = new $TYPE(...);
+          ...
+          $STREAM.write(...);
+      - pattern-not: |
+          try ($TYPE $STREAM = ...) { ... }
+      - pattern-not: |
+          try { ... } finally { $STREAM.close(); }
+    metadata:
+      category: stability
+      subcategory: resource-leak
+
+  # ─── 4. 无限递归或深度递归 ────────────────────────────────────────────
+  - id: direct-self-recursion
+    languages: [java]
+    severity: ERROR
+    message: |
+      [稳定性] 方法直接调用自身，存在无限递归风险，可能导致 StackOverflowError。
+      建议：检查递归终止条件是否完备，或改用迭代实现。
+    pattern: |
+      $RETTYPE $METHOD(...) {
+        ...
+        $METHOD(...);
+        ...
+      }
+    metadata:
+      category: stability
+      subcategory: infinite-recursion
+
+  # ─── 5. 死循环或逻辑阻塞 ──────────────────────────────────────────────
+  - id: while-true-no-break
+    languages: [java]
+    severity: WARNING
+    message: |
+      [稳定性] while(true) 循环内未检测到 break/return/throw，存在死循环风险。
+      建议：确认循环退出条件，或添加超时/计数保护。
+    patterns:
+      - pattern: while (true) { ... }
+      - pattern-not: while (true) { ... break; ... }
+      - pattern-not: while (true) { ... return ...; ... }
+      - pattern-not: while (true) { ... throw ...; ... }
+    metadata:
+      category: stability
+      subcategory: infinite-loop
+
+  - id: thread-sleep-in-loop
+    languages: [java]
+    severity: INFO
+    message: |
+      [稳定性] 循环内使用 Thread.sleep() 做轮询，存在阻塞线程风险。
+      建议：考虑使用 ScheduledExecutorService 或事件驱动方案。
+    pattern: |
+      while (...) {
+        ...
+        Thread.sleep(...);
+        ...
+      }
+    metadata:
+      category: stability
+      subcategory: blocking
+
+  # ─── 6. 内存溢出 OOM ──────────────────────────────────────────────────
+  - id: list-add-in-infinite-loop
+    languages: [java]
+    severity: WARNING
+    message: |
+      [稳定性] 在循环中向集合无限添加元素，可能导致堆内存溢出 OOM。
+      建议：对集合大小设置上限，或分批处理后清空。
+    patterns:
+      - pattern: |
+          while (...) {
+            ...
+            $LIST.add(...);
+            ...
+          }
+      - pattern: |
+          for (...) {
+            ...
+            $LIST.add(...);
+            ...
+          }
+    metadata:
+      category: stability
+      subcategory: oom
